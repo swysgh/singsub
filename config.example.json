@@ -1,0 +1,12 @@
+{
+  "token": "your-secret-token",
+  "subs": {
+    "自建": "https://sub.example.com/api/v1/client/subscribe?token=xxx",
+    "客户": "https://sub.example.com/api/v1/client/subscribe?token=yyy",
+    "rtx.al": "https://another.example.com/sub"
+  },
+  "scripts": {
+    "desktop": "substore/desktop.py",
+    "homeserver": "substore/homeserver.py"
+  }
+}
