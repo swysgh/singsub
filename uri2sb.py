@@ -157,9 +157,6 @@ def parse_vless(uri):
     flow = query.get("flow")
     if flow:
         node["flow"] = flow
-    encryption = query.get("encryption")
-    if encryption:
-        node["encryption"] = encryption
     # 传输层
     net = query.get("type", "tcp")
     if net == "ws":
