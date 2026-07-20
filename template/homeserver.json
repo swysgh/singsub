@@ -1,0 +1,219 @@
+{
+  "log": {
+    "level": "debug",
+    "timestamp": true
+  },
+  "dns": {
+    "servers": [
+      {
+        "type": "udp",
+        "tag": "alidns",
+        "server": "223.5.5.5",
+        "server_port": 53
+      },
+      {
+        "type": "udp",
+        "tag": "google-dns",
+        "server": "8.8.8.8",
+        "server_port": 53,
+        "detour": "select"
+      },
+      {
+        "type": "udp",
+        "tag": "dn42-dns",
+        "server": "172.20.0.53",
+        "server_port": 53,
+        "detour": "direct-dn42"
+      }
+    ],
+    "rules": [
+      {
+        "clash_mode": "direct",
+        "server": "alidns"
+      },
+      {
+        "clash_mode": "global",
+        "server": "google-dns"
+      },
+      {
+        "domain_suffix": [
+          "dn42"
+        ],
+        "server": "dn42-dns"
+      },
+      {
+        "rule_set": "geosite-!cn",
+        "strategy": "ipv4_only",
+        "server": "google-dns"
+      },
+      {
+        "rule_set": [
+          "geosite-cn",
+          "geoip-cn"
+        ],
+        "server": "alidns"
+      }
+    ],
+    "strategy": "ipv4_only",
+    "final": "google-dns"
+  },
+  "inbounds": [
+    {
+      "type": "tproxy",
+      "tag": "tproxy-in",
+      "listen": "::",
+      "listen_port": 12345
+    },
+    {
+      "type": "mixed",
+      "tag": "mixed-in",
+      "listen": "::",
+      "listen_port": 2083,
+      "users": [
+        {
+          "username": "homeserver",
+          "password": "QrRl3RBJsN6t9+VPCgyXAA=="
+        }
+      ]
+    },
+    {
+      "type": "shadowsocks",
+      "tag": "ss-in",
+      "listen": "::",
+      "listen_port": 56987,
+      "method": "2022-blake3-aes-128-gcm",
+      "password": "5WdRWUNB80/IrQPuDYLOtg==",
+      "multiplex": {
+        "enabled": true
+      }
+    }
+  ],
+  "outbounds": [
+    {
+      "type": "urltest",
+      "tag": "auto",
+      "outbounds": [],
+      "url": "https://cp.cloudflare.com/",
+      "interval": "30s",
+      "tolerance": 10,
+      "idle_timeout": "10m",
+      "interrupt_exist_connections": false
+    },
+    {
+      "type": "selector",
+      "tag": "select",
+      "outbounds": [],
+      "default": "auto"
+    },
+    {
+      "type": "selector",
+      "tag": "claude",
+      "outbounds": []
+    },
+    {
+      "type": "direct",
+      "tag": "direct",
+      "routing_mark": 255
+    },
+    {
+      "type": "direct",
+      "tag": "direct-ospf",
+      "inet4_bind_address": "10.0.0.2",
+      "routing_mark": 255
+    },
+    {
+      "type": "direct",
+      "tag": "direct-dn42",
+      "inet4_bind_address": "172.20.192.98",
+      "routing_mark": 255
+    }
+  ],
+  "route": {
+    "default_domain_resolver": "alidns",
+    "rule_set": [
+      {
+        "tag": "geosite-cn",
+        "type": "remote",
+        "format": "binary",
+        "url": "https://github.com/SagerNet/sing-geosite/raw/refs/heads/rule-set/geosite-cn.srs",
+        "download_detour": "select"
+      },
+      {
+        "tag": "geoip-cn",
+        "type": "remote",
+        "format": "binary",
+        "url": "https://github.com/SagerNet/sing-geoip/raw/refs/heads/rule-set/geoip-cn.srs",
+        "download_detour": "select"
+      },
+      {
+        "tag": "geosite-!cn",
+        "type": "remote",
+        "format": "binary",
+        "url": "https://github.com/SagerNet/sing-geosite/raw/refs/heads/rule-set/geosite-geolocation-!cn.srs",
+        "download_detour": "select"
+      }
+    ],
+    "rules": [
+      {
+        "action": "sniff"
+      },
+      {
+        "protocol": "dns",
+        "action": "hijack-dns"
+      },
+      {
+        "ip_cidr": "172.20.0.0/14",
+        "outbound": "direct-dn42"
+      },
+      {
+        "ip_cidr": "10.0.0.0/24",
+        "outbound": "direct-ospf"
+      },
+      {
+        "inbound": "ss-in",
+        "outbound": "direct"
+      },
+      {
+        "clash_mode": "direct",
+        "outbound": "direct"
+      },
+      {
+        "clash_mode": "global",
+        "outbound": "select"
+      },
+      {
+        "protocol": "bittorrent",
+        "outbound": "direct"
+      },
+      {
+        "ip_is_private": true,
+        "outbound": "direct"
+      },
+      {
+        "rule_set": [
+          "geoip-cn",
+          "geosite-cn"
+        ],
+        "outbound": "direct"
+      },
+      {
+        "source_ip_cidr": "10.1.0.3",
+        "outbound": "claude"
+      }
+    ],
+    "final": "select",
+    "auto_detect_interface": true
+  },
+  "experimental": {
+    "cache_file": {
+      "enabled": true
+    },
+    "clash_api": {
+      "external_controller": "0.0.0.0:9090",
+      "external_ui": "ui",
+      "external_ui_download_url": "https://github.com/MetaCubeX/Yacd-meta/archive/gh-pages.zip",
+      "default_mode": "rule",
+      "external_ui_download_detour": "select"
+    }
+  }
+}
