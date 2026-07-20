@@ -192,9 +192,11 @@ def parse_vless(uri):
         if query.get("allowInsecure") in ("1", "true"):
             tls["insecure"] = True
     elif query.get("security") == "reality":
+        # sing-box 要求 tls 顶层 enabled=true，reality 才会生效
+        tls["enabled"] = True
         tls["reality"] = {"enabled": True}
-        if query.get("sni"):
-            tls["server_name"] = query["sni"]
+        if query.get("sni") or query.get("servername"):
+            tls["server_name"] = query.get("sni") or query.get("servername")
         if query.get("pbk"):
             tls["reality"]["public_key"] = query["pbk"]
         if query.get("sid"):
