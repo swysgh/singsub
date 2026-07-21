@@ -118,9 +118,9 @@ http://host:port/<token>                                ← 合并所有订阅�
 
 | 输入格式 | 识别方式 | 处理 |
 |---|---|---|
-| **sing-box JSON** | 以 `{` 开头，含 `outbounds` 字段 | 直接提取 `outbounds` |
-| **Clash YAML** | `yaml.safe_load` 含 `proxies` 字段 | `clash2singbox` 转换 |
-| **URI 列表** | 以上都不匹配 |按行识别 `ss://` / `vmess://` / `vless://` / `trojan://` |
+| **sing-box JSON** | 以 `{` 开头，含 `outbounds` 字段 | 分别提取 `outbounds` 和 `endpoints` |
+| **Clash YAML** | `yaml.safe_load` 含 `proxies` 字段 | `clash2singbox` 转换，全部归入 `outbounds` |
+| **URI 列表** | 以上都不匹配 |按行识别 `ss://` / `vmess://` / `vless://` / `trojan://`，全部归入 `outbounds` |
 
 ### 支持的单节点协议
 
@@ -145,7 +145,8 @@ URI 格式支持完整选项（TLS、Reality、WebSocket、gRPC、HTTP 传输等
 
 ```python
 def assemble(context):
-    # context["subs"]      懒加载：subs["自建"] 自动抓取+解析，返回节点 list
+    # context["subs"]      懒加载：subs["自建"] 自动抓取+解析，返回 (outbounds, endpoints) 元组
+    #                      取 outbounds 用 subs["自建"][0]，取 endpoints 用 subs["自建"][1]
     # context["args"]      查询参数 dict（不含 script/format/ua/name）
     # context["config_dir"] 配置文件所在目录
     return config_dict     # 最终 sing-box 配置
@@ -163,10 +164,20 @@ def assemble(context):
 
 ### 脚本特点
 
-- **懒加载**：`subs["自建"]` 用到时才去抓取并转换，结果缓存。
+- **懒加载**：`subs["自建"]` 用到时才去抓取并解析，返回 `(outbounds, endpoints)` 元组，结果缓存。
 - **热重载**：脚本文件修改后自动重新加载（基于 mtime 检测），无需重启服务。
 - **模板自主权**：脚本自行决定用哪个模板文件、是否过滤节点、如何填充分组。
 - **查询参数透传**：URL 上的额外参数通过 `context["args"]` 传递给脚本。
+
+### Wireguard 处理
+
+sing-box 中 wireguard 属于 `endpoints` 而非 `outbounds`。引擎在解析阶段就保持分离：
+- **sing-box JSON 输入**：`outbounds` 和 `endpoints` 分别提取，不混淆
+- **Clash / URI 输入**：全部归入 `outbounds`，`endpoints` 为空（这两种格式不含 wireguard 节点）
+
+脚本如需 wireguard，从 `subs["自建"][1]` 取 `endpoints` 列表即可。
+
+> ⚠️ **URI 输出不支持 wireguard**：`format=uri` 只输出 `outbounds`，wireguard 节点会被跳过。
 
 ---
 
@@ -181,27 +192,22 @@ singsub/
 ├── uri2sb.py              # URI → sing-box 节点
 ├── sb2uri.py              # sing-box → URI
 ├── common.py              # JSON 序列化、查询字符串解析
+├── yaml.py                # 内嵌 PyYAML（无外部依赖）
 │
 ├── config.example.json    # 配置示例
 │
 ├── script/                # 装配脚本
 │
-├── template/              # sing-box 配置模板
-│
-├── node/                  # 本地订阅文件
-│
-└── yaml/                  # 内嵌 PyYAML（无外部依赖）
-    ├── __init__.py
-    └── ...
+└── template/              # sing-box 配置模板
 ```
 
 ---
 
 ## 依赖
 
-- **Python ≥ 3.10**（使用 `match` 语法）
+- **Python ≥ 3.7**
 - `requests`（HTTP 订阅获取）
-- 无其他外部依赖（`yaml/` 目录是内嵌的 PyYAML）
+- 无其他外部依赖（`yaml.py` 是内嵌的 PyYAML）
 
 ```bash
 pip install requests
@@ -255,7 +261,7 @@ print(json.dumps(config, indent=2, ensure_ascii=False))
 A: 不需要。脚本基于 mtime 缓存，修改文件后下次请求自动加载新版本。修改 `config.json` 的 `subs` 则需要重启。
 
 **Q: 如何在脚本中使用更多订阅？**
-A: 脚本中通过 `context["subs"]["订阅名"]` 访问。订阅名必须在 `config.json` 的 `subs` 中有定义（否则抛 `KeyError`）。用 `subs.get("订阅名", [])` 可以安全地取不存在的订阅（返回空列表）。
+A: 脚本中通过 `context["subs"]["订阅名"]` 访问，返回 `(outbounds, endpoints)` 元组。订阅名必须在 `config.json` 的 `subs` 中有定义（否则抛 `KeyError`）。用 `subs.get("订阅名", ([], []))` 可以安全地取不存在的订阅（返回 `([], [])`）。
 
 **Q: 服务端口被占用？**
 ```bash

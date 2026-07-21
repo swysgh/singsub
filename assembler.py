@@ -3,7 +3,9 @@
 参考 substore 模式：引擎负责抓订阅 + 转换，脚本负责选模板、装配、返回最终配置。
 
 脚本契约：定义 `def assemble(context)`，返回 sing-box 配置 dict。
-- context["subs"]  : 懒加载映射，subs["自建"] 触发抓取+转换并缓存，返回节点 list
+- context["subs"]  : 懒加载映射，subs["自建"] 触发抓取+转换并缓存，
+                     返回 (outbounds, endpoints) 元组。
+                     取 outbounds 用 subs["自建"][0]，取 endpoints 用 subs["自建"][1]。
 - context["args"]  : 查询参数 dict（除 script/format/ua/name 外的字段）
 - context["config_dir"] : 配置文件所在目录（脚本可用它定位模板）
 """
@@ -16,9 +18,10 @@ from fetch import getsub
 
 
 class LazySubs:
-    """按名懒加载订阅节点，抓取+转换结果缓存。
+    """按名懒加载订阅节点，抓取+解析结果缓存。
 
-    subs['自建']    -> 触发 getsub+detect_and_parse，返回节点 list（不存在则 KeyError）
+    subs['自建']    -> 触发 getsub+detect_and_parse，返回 (outbounds, endpoints) 元组
+                       （不存在则 KeyError）
     subs.get('名')  -> 不存在返回 None
     """
 
