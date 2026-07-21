@@ -25,8 +25,8 @@ def assemble(context):
     with open(TEMPLATE, "r", encoding="utf-8") as f:
         config = json.load(f)
 
-    self_built = subs["自建"]
-    ikuuu = subs["ikuuu"]
+    self_built = subs["自建"][0]
+    ikuuu = subs["ikuuu"][0]
 
     # 过滤掉 tag 匹配正则的自建节点
     self_built_filtered = [p for p in self_built if not FILTER_REGEX.search(p["tag"])]

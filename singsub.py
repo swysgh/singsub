@@ -25,46 +25,57 @@ CONFIG_DIR = ""
 def detect_and_parse(origin_data):
     """自动识别订阅格式，提取节点列表。
 
-    sing-box JSON 输入：只取其 outbounds 字段（便于后续合并进模板）。
-    clash / URI 输入：正常解析。
+    返回 (outbounds, endpoints) 元组。
+    wireguard 节点在 sing-box 中属于 endpoint，不放在 outbounds 中。
+    clash / URI 输入：全部视为 outbounds，endpoints 为空。
     """
     stripped = origin_data.lstrip()
-    # sing-box 配置是 JSON 且顶层含 outbounds：只取 outbounds
+    # sing-box 配置是 JSON 且顶层含 outbounds：分别取 outbounds / endpoints
     if stripped.startswith("{"):
         try:
             config = json.loads(origin_data)
             if isinstance(config, dict) and "outbounds" in config:
-                return config["outbounds"]
+                outbounds = config["outbounds"] or []
+                endpoints = config.get("endpoints") or []
+                return (outbounds, endpoints)
         except json.JSONDecodeError:
             pass
     # clash yaml：尝试用 yaml 解析，带 proxies 字段的就是 Clash 配置
     try:
         parsed = yaml.safe_load(origin_data)
         if isinstance(parsed, dict) and "proxies" in parsed:
-            return clash2singbox(origin_data)
+            nodes = clash2singbox(origin_data)
+            return (nodes or [], [])
     except yaml.YAMLError:
         pass
     # 否则按 URI 订阅处理
-    return uri2singbox(origin_data)
+    try:
+        nodes = uri2singbox(origin_data)
+        return (nodes or [], [])
+    except Exception:
+        sys.stderr.write("URI 解析失败，订阅格式无法识别\n")
+        return ([], [])
 
 
-def render_nodes(nodes, fmt):
-    """把节点列表渲染成 (content_type, body)。"""
+def render_nodes(outbounds, endpoints, fmt):
+    """把 outbounds / endpoints 渲染成 (content_type, body)。
+
+    uri 格式只输出 outbounds（wireguard 不支持转 URI）。
+    """
     if fmt == "uri":
-        return "text/plain; charset=utf-8", singbox2uri(nodes)
-    return "application/json; charset=utf-8", dict2json({"outbounds": nodes})
+        return "text/plain; charset=utf-8", singbox2uri(outbounds)
+    config = {"outbounds": outbounds}
+    if endpoints:
+        config["endpoints"] = endpoints
+    return "application/json; charset=utf-8", dict2json(config)
 
 
 def convert(origin_data, fmt):
-    """把单份订阅原文转成目标格式的 (content_type, body)。失败返回 None。
-
-    始终只取节点（outbounds），sing-box 输入也仅取其 outbounds 字段，
-    便于后续脚本把节点合并进模板配置。
-    """
-    nodes = detect_and_parse(origin_data)
-    if not nodes:
+    """把单份订阅原文转成目标格式的 (content_type, body)。失败返回 None。"""
+    outbounds, endpoints = detect_and_parse(origin_data)
+    if not outbounds and not endpoints:
         return None
-    return render_nodes(nodes, fmt)
+    return render_nodes(outbounds, endpoints, fmt)
 
 
 def render(origin_data, fmt):
@@ -131,24 +142,26 @@ class Handler(BaseHTTPRequestHandler):
             self._respond(404, "text/plain; charset=utf-8", "配置文件未定义任何订阅\n")
             return
 
-        allnodes = []
+        all_outbounds = []
+        all_endpoints = []
         failed = []
         for sub_name, url in targets:
             origin = getsub(url, ua, CONFIG_DIR)
             if not origin:
                 failed.append(sub_name)
                 continue
-            nodes = detect_and_parse(origin)
-            if nodes:
-                allnodes.extend(nodes)
+            outbounds, endpoints = detect_and_parse(origin)
+            if outbounds or endpoints:
+                all_outbounds.extend(outbounds)
+                all_endpoints.extend(endpoints)
             else:
                 sys.stderr.write(f"订阅 {sub_name} 解析无节点\n")
 
-        if not allnodes:
+        if not all_outbounds and not all_endpoints:
             self._respond(422, "text/plain; charset=utf-8", "解析失败，未得到任何节点\n")
             return
 
-        result = render_nodes(allnodes, fmt)
+        result = render_nodes(all_outbounds, all_endpoints, fmt)
 
         if failed:
             sys.stderr.write(f"部分订阅获取失败: {', '.join(failed)}\n")
@@ -190,6 +203,9 @@ class Handler(BaseHTTPRequestHandler):
 def load_config(path):
     with open(path, "r", encoding="utf-8") as f:
         cfg = json.load(f)
+    if "token" not in cfg or not isinstance(cfg["token"], str) or not cfg["token"]:
+        sys.stderr.write("配置文件需配置非空 token 字符串\n")
+        sys.exit(1)
     if "subs" not in cfg or not isinstance(cfg["subs"], dict):
         sys.stderr.write("配置文件需包含 subs 对象\n")
         sys.exit(1)

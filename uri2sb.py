@@ -13,7 +13,7 @@ def uri2singbox(origin_data):
     # 探测是否整体 base64：非 base64 直接当明文按行处理
     text = origin_data.strip()
     lines = text.splitlines()
-    is_plain = any(l.strip().startswith(("ss://", "vmess://", "vless://", "trojan://")) for l in lines)
+    is_plain = any(l.strip().startswith(("ss://", "vmess://", "vless://", "trojan://", "wireguard://", "wg://")) for l in lines)
     if not is_plain:
         decoded = base64.urlsafe_b64decode(text.replace("\n", "").replace("\r", "")).decode("utf-8")
         if decoded:
@@ -22,7 +22,7 @@ def uri2singbox(origin_data):
     allnode = []
     for line in lines:
         line = line.strip()
-        if not line or not line.startswith(("ss://", "vmess://", "vless://", "trojan://")):
+        if not line or not line.startswith(("ss://", "vmess://", "vless://", "trojan://", "wireguard://", "wg://")):
             continue
         try:
             if line.startswith("vmess://"):
@@ -31,6 +31,8 @@ def uri2singbox(origin_data):
                 node = parse_ss(line)
             elif line.startswith("vless://"):
                 node = parse_vless(line)
+            elif line.startswith(("wireguard://", "wg://")):
+                node = parse_wireguard(line)
             else:
                 node = parse_trojan(line)
             if node:
@@ -239,4 +241,77 @@ def parse_trojan(uri):
     if query.get("allowInsecure") in ("1", "true"):
         tls["insecure"] = True
     node["tls"] = tls
+    return node
+
+def parse_wireguard(uri):
+    """解析 wireguard:// URI 转 sing-box wireguard endpoint 节点。
+
+    格式参考：wireguard://<public_key>@<server>:<port>?<query>#<name>
+    常见 query 参数：
+      private_key / reserved / mtu / address / allowed_ips /
+      pre_shared_key / persistent_keepalive / workers / dns
+    """
+    body = uri.split("://", 1)[1]
+    name = None
+    if "#" in body:
+        body, name = body.split("#", 1)
+        name = urllib.parse.unquote(name)
+    query = {}
+    if "?" in body:
+        body, q = body.split("?", 1)
+        query = parse_query(q)
+    public_key, hostport = body.rsplit("@", 1)
+    host, port = hostport.rsplit(":", 1)
+
+    node = {
+        "tag": name or host,
+        "type": "wireguard",
+        "server": host,
+        "server_port": int(port),
+        "local_address": [],
+        "private_key": query.get("private_key", ""),
+        "peers": [{
+            "address": host,
+            "port": int(port),
+            "public_key": urllib.parse.unquote(public_key),
+        }],
+    }
+
+    # local address：address=10.0.0.2/32,fd00::2/128
+    addr = query.get("address", "")
+    if addr:
+        node["local_address"] = addr.split(",")
+
+    # allowed_ips：默认 0.0.0.0/0,::/0
+    allowed = query.get("allowed_ips", "0.0.0.0/0,::/0")
+    node["peers"][0]["allowed_ips"] = allowed.split(",")
+
+    # pre_shared_key
+    if query.get("pre_shared_key"):
+        node["peers"][0]["pre_shared_key"] = query["pre_shared_key"]
+
+    # persistent_keepalive_interval
+    keepalive = query.get("persistent_keepalive") or query.get("persistent_keepalive_interval")
+    if keepalive:
+        node["peers"][0]["persistent_keepalive_interval"] = int(keepalive)
+
+    # reserved：reserved=1,2,3
+    reserved = query.get("reserved")
+    if reserved:
+        node["reserved"] = [int(x) for x in reserved.split(",")]
+
+    # mtu
+    mtu = query.get("mtu")
+    if mtu:
+        node["mtu"] = int(mtu)
+
+    # workers
+    workers = query.get("workers")
+    if workers:
+        node["workers"] = int(workers)
+
+    # dns（sing-box 不直接消费，保留到 system 字段，便于脚本使用）
+    if query.get("dns"):
+        node["dns"] = query["dns"].split(",")
+
     return node

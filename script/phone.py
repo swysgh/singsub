@@ -62,11 +62,11 @@ def assemble(context):
     with open(TEMPLATE, "r", encoding="utf-8") as f:
         config = json.load(f)
 
-    self_built = subs.get("自建", [])
+    self_built = subs.get("自建", ([], []))[0]
     # 筛选掉带 流量/套餐 字样的节点（信息节点，非代理）
-    rtxal = [p for p in subs.get("rtx.al", []) if not re.search(r"(流量|套餐)", p["tag"])]
-    ikuuu = subs.get("ikuuu", [])
-    client = subs.get("客户", [])
+    rtxal = [p for p in subs.get("rtx.al", ([], []))[0] if not re.search(r"(流量|套餐)", p["tag"])]
+    ikuuu = subs.get("ikuuu", ([], []))[0]
+    client = subs.get("客户", ([], []))[0]
 
     # 添加分组：dns → selector → urltest
     add_dns(config, UNLOCK_TAGS)

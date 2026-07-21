@@ -34,11 +34,11 @@ class LazySubs:
             return None
         origin = getsub(url, self._ua, self._config_dir)
         if not origin:
-            return []
+            return ([], [])
         # 延迟导入避免循环依赖（singsub 导入 assembler）
         from singsub import detect_and_parse
-        nodes = detect_and_parse(origin)
-        return nodes or []
+        outbounds, endpoints = detect_and_parse(origin)
+        return (outbounds or [], endpoints or [])
 
     def __getitem__(self, name):
         if name not in self._cache:

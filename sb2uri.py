@@ -132,7 +132,68 @@ def _node_to_uri(node):
         build_tls(node.get("tls"))
         return f"trojan://{userinfo}@{server}:{port}{qs()}{fragment}"
 
+    if ntype == "wireguard":
+        return _wireguard_to_uri(node, server, port, tag)
+
     return None
+
+def _wireguard_to_uri(node, server, port, tag):
+    """把 sing-box wireguard endpoint 节点转成 wireguard:// URI 字符串。"""
+    query = []
+    fragment = "#" + urllib.parse.quote(tag, safe="") if tag else ""
+
+    # public_key 从 peers[0] 获取
+    peers = node.get("peers", [])
+    if not peers:
+        return None
+    peer0 = peers[0]
+    public_key = peer0.get("public_key", "")
+
+    # private_key（顶层字段）
+    if node.get("private_key"):
+        query.append(("private_key", node["private_key"]))
+
+    # local_address：address=10.0.0.2/32,fd00::2/128
+    local_addr = node.get("local_address", [])
+    if local_addr:
+        query.append(("address", ",".join(local_addr)))
+
+    # allowed_ips
+    allowed_ips = peer0.get("allowed_ips", [])
+    if allowed_ips:
+        query.append(("allowed_ips", ",".join(allowed_ips)))
+
+    # pre_shared_key
+    if peer0.get("pre_shared_key"):
+        query.append(("pre_shared_key", peer0["pre_shared_key"]))
+
+    # persistent_keepalive_interval
+    keepalive = peer0.get("persistent_keepalive_interval")
+    if keepalive:
+        query.append(("persistent_keepalive", str(keepalive)))
+
+    # reserved
+    reserved = node.get("reserved")
+    if reserved:
+        query.append(("reserved", ",".join(str(x) for x in reserved)))
+
+    # mtu
+    mtu = node.get("mtu")
+    if mtu:
+        query.append(("mtu", str(mtu)))
+
+    # workers
+    workers = node.get("workers")
+    if workers:
+        query.append(("workers", str(workers)))
+
+    # dns
+    dns = node.get("dns")
+    if dns:
+        query.append(("dns", ",".join(dns) if isinstance(dns, list) else dns))
+
+    qs = "?" + "&".join(f"{k}={urllib.parse.quote(str(v), safe='')}" for k, v in query) if query else ""
+    return f"wireguard://{urllib.parse.quote(public_key, safe='')}@{server}:{port}{qs}{fragment}"
 
 def singbox2uri(data):
     """把 sing-box 节点（dict / 列表 / 含 outbounds 的配置 dict）转成 URI 字符串。

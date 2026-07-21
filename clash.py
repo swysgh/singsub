@@ -164,4 +164,53 @@ def clash2singbox(origin_data):
                 tls(onenode, node)
                 v2ray_transport(onenode, node)
                 allnode.append(node)
+            case "wireguard":
+                node = {"tag": onenode["name"], "type": "wireguard", "server": onenode["server"], "server_port": int(onenode["port"])}
+                # private-key
+                private_key = onenode.get("private-key") or onenode.get("private_key")
+                if private_key:
+                    node["private_key"] = private_key
+                # local_address（Clash 中叫 ip / ip-address）
+                ip = onenode.get("ip") or onenode.get("ip-address") or onenode.get("local_address")
+                if ip:
+                    node["local_address"] = ip if isinstance(ip, list) else [ip]
+                else:
+                    node["local_address"] = []
+                # peers
+                public_key = onenode.get("public-key") or onenode.get("public_key")
+                if not public_key:
+                    continue
+                peer = {"address": onenode["server"], "port": int(onenode["port"]), "public_key": public_key}
+                # allowed-ips
+                allowed_ips = onenode.get("allowed-ips") or onenode.get("allowed_ips") or ["0.0.0.0/0", "::/0"]
+                peer["allowed_ips"] = allowed_ips if isinstance(allowed_ips, list) else [allowed_ips]
+                # pre-shared-key
+                psk = onenode.get("pre-shared-key") or onenode.get("pre_shared_key")
+                if psk:
+                    peer["pre_shared_key"] = psk
+                # keepalive
+                keepalive = onenode.get("keepalive") or onenode.get("persistent_keepalive_interval")
+                if keepalive:
+                    peer["persistent_keepalive_interval"] = int(keepalive)
+                node["peers"] = [peer]
+                # reserved
+                reserved = onenode.get("reserved")
+                if reserved:
+                    node["reserved"] = [int(x) for x in (reserved if isinstance(reserved, list) else reserved.split(","))]
+                # mtu
+                mtu = onenode.get("mtu")
+                if mtu:
+                    node["mtu"] = int(mtu)
+                # workers
+                workers = onenode.get("workers")
+                if workers:
+                    node["workers"] = int(workers)
+                # dns
+                dns = onenode.get("dns")
+                if dns:
+                    node["dns"] = dns if isinstance(dns, list) else [dns]
+                # udp
+                if not checkfalse(onenode.get("udp")):
+                    pass  # wireguard 默认支持 UDP
+                allnode.append(node)
     return allnode
