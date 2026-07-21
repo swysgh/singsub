@@ -61,6 +61,7 @@ cp config.example.json config.json
 http://host:port/<token>?name=<订阅名>&format=singbox|uri
 http://host:port/<token>?script=<脚本名>&format=singbox|uri
 http://host:port/<token>                                ← 合并所有订阅（注意，由于没有对多余参数做处理，如果script写成scripts也会变成这个）
+http://host:port/<share_key>                            ← 分享链接（免 token，直接执行配置的脚本）
 ```
 
 | 参数 | 说明 |
@@ -71,6 +72,8 @@ http://host:port/<token>                                ← 合并所有订阅�
 | `ua` | 自定义 User-Agent |
 
 **token 安全**：URL 路径首段作为 token 验证，使用 `hmac.compare_digest` 防时序攻击。
+
+**分享链接**：路径首段匹配 `shares` 中的键时，跳过 token 验证，直接执行对应的脚本。适合生成固定链接给客户端使用，无需暴露 token。
 
 > **注意**：URL 参数名是 `?script=…`（单数 `script`，不是 `scripts`）。常见拼写错误。
 
@@ -90,6 +93,10 @@ http://host:port/<token>                                ← 合并所有订阅�
   "scripts": {
     "desktop": "script/desktop.py",
     "homeserver": "script/homeserver.py"
+  },
+  "shares": {
+    "share_abc123": "homeserver",
+    "share_def456": "desktop"
   }
 }
 ```
@@ -99,6 +106,21 @@ http://host:port/<token>                                ← 合并所有订阅�
 | `token` | URL 路径验证密码 |
 | `subs` | 订阅名 → 订阅链接或本地文件路径 |
 | `scripts` | 脚本名 → 装配脚本路径（可选） |
+| `shares` | 分享键 → 脚本名（可选）。键值自己取随机字符串，命中后免 token 执行对应脚本 |
+
+### 分享链接
+
+`shares` 用于生成可分享的订阅链接，键值由你自己取随机字符串手写进配置：
+
+```json
+"shares": {
+    "share_abc123": "homeserver"
+}
+```
+
+访问 `http://host:port/share_abc123` 等价于 `http://host:port/<token>?script=homeserver`，但无需暴露 token。适合把链接直接填进客户端，后续想换脚本只改配置即可，链接不变。
+
+> 分享键只是普通字符串查表，不做时序安全比较（它本身就是公开的随机串）。要保证安全，键要足够长且随机，别用 `test`、`1` 这种弱键。
 
 ### 本地文件作为订阅
 

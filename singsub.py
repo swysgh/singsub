@@ -125,8 +125,27 @@ class Handler(BaseHTTPRequestHandler):
             self._respond(200, "text/plain; charset=utf-8", "singsub running\n")
             return
 
+        key = segments[0]
+
+        # 分享链接：key 匹配 shares 中的键，跳过 token 验证直接执行脚本
+        shares = CONFIG.get("shares") or {}
+        if key in shares:
+            script_name = shares[key]
+            if not isinstance(script_name, str):
+                self._respond(400, "text/plain; charset=utf-8", "配置错误: shares 值需为脚本名字符串\n")
+                return
+            qs = parse_qs(parsed.query)
+            fmt = qs.get("format", ["singbox"])[0]
+            if fmt not in ("singbox", "uri"):
+                self._respond(400, "text/plain; charset=utf-8", "format 只能是 singbox 或 uri\n")
+                return
+            ua = qs.get("ua", [None])[0]
+            logger.info("分享链接命中: %s -> script=%s", key, script_name)
+            self._handle_script(script_name, qs, fmt, ua)
+            return
+
         # 路径首段即验证密码
-        token = segments[0]
+        token = key
         expect_token = CONFIG.get("token", "")
         if not expect_token or not hmac.compare_digest(token, expect_token):
             logger.warning("token 验证失败: %s", self.address_string())
@@ -246,7 +265,19 @@ def load_config(path):
             if not isinstance(spath, str):
                 logger.critical("脚本 %s 的值需为脚本路径字符串", key)
                 sys.exit(1)
-    logger.info("配置文件加载成功，订阅: %d 个，脚本: %d 个", len(cfg.get("subs", {})), len(cfg.get("scripts", {})))
+    shares = cfg.get("shares")
+    if shares is not None:
+        if not isinstance(shares, dict):
+            logger.critical("配置文件 shares 需为对象：分享键 -> 脚本名")
+            sys.exit(1)
+        for key, script_name in shares.items():
+            if not isinstance(script_name, str):
+                logger.critical("分享 %s 的值需为脚本名字符串", key)
+                sys.exit(1)
+            if scripts and script_name not in scripts:
+                logger.warning("分享 %s 引用的脚本 %s 未在 scripts 中定义", key, script_name)
+    logger.info("配置文件加载成功，订阅: %d 个，脚本: %d 个，分享链接: %d 个",
+                 len(cfg.get("subs", {})), len(cfg.get("scripts", {})), len(cfg.get("shares", {})))
     return cfg
 
 def cmd_serve(args):
@@ -258,6 +289,9 @@ def cmd_serve(args):
     logger.info("已加载订阅: %s", ", ".join(CONFIG["subs"].keys()))
     if CONFIG.get("scripts"):
         logger.info("已加载脚本: %s", ", ".join(CONFIG["scripts"].keys()))
+    shares = CONFIG.get("shares") or {}
+    if shares:
+        logger.info("已加载分享链接: %s", ", ".join(f"{k} -> {v}" for k, v in shares.items()))
     try:
         server.serve_forever()
     except KeyboardInterrupt:

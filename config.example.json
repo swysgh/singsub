@@ -8,5 +8,9 @@
   "scripts": {
     "desktop": "substore/desktop.py",
     "homeserver": "substore/homeserver.py"
+  },
+  "shares": {
+    "share_abc123": "homeserver",
+    "share_def456": "desktop"
   }
 }
