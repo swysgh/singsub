@@ -11,12 +11,7 @@
 cp config.example.json config.json
 # 编辑 config.json：填写 token 和订阅链接
 
-# 2. 命令行转换
-./singsub.py convert "https://你的订阅链接"
-./singsub.py convert "https://..." -f uri                                          # 转成 URI
-./singsub.py convert "https://..." -o result.json                                  # 输出到文件
-
-# 3. HTTP 服务
+# 2. HTTP 服务
 ./singsub.py serve
 # 访问 http://localhost:8080/<token>?name=自建
 # 访问 http://localhost:8080/<token>?name=自建&format=uri
@@ -27,21 +22,6 @@ cp config.example.json config.json
 ---
 
 ## 用法
-
-### 命令行
-
-这玩意是我一开始拿来验证转换是否正确的，后面感觉自己写太累了，让glm5.2接手成用http了，之后基本不会动了
-
-```
-./singsub.py convert <url> [-f singbox|uri] [-u <user-agent>] [-o <文件>]
-```
-
-| 参数 | 说明 |
-|---|---|
-| `url` | 订阅链接（http/https） |
-| `-f` / `--format` | 输出格式：`singbox`（默认）或 `uri` |
-| `-u` / `--user-agent` | 请求时的 User-Agent，默认 `Mihomo` |
-| `-o` / `--output` | 输出到文件，默认打印到 stdout |
 
 ### HTTP 服务
 
@@ -243,7 +223,7 @@ pip install requests
 
 | 文件 | 作用 |
 |---|---|
-| `singsub.py` | 入口文件。`detect_and_parse` 自动识别订阅格式；`Handler` 处理 HTTP 请求；`cmd_serve` 启动服务；`cmd_convert` 命令行转换 |
+| `singsub.py` | 入口文件。`detect_and_parse` 自动识别订阅格式；`Handler` 处理 HTTP 请求；`cmd_serve` 启动 HTTP 服务 |
 | `assembler.py` | `LazySubs` 类：懒加载订阅（用到才拉取、解析、缓存）。`run_script`：加载 Python 脚本文件，传入 context 并调用 `assemble`。`_load_script`：带 mtime 缓存的动态加载 |
 | `fetch.py` | `getsub(url, ua, base_dir)`：自动判断 URL / 本地文件，HTTP 用 requests 获取，本地文件从磁盘读取 |
 | `clash.py` | `clash2singbox`：YAML 解析 → 遍历 `proxies` → 按类型（ss/vmess/vless/trojan）转换 → 返回 sing-box 节点列表 |

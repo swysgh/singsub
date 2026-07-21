@@ -74,20 +74,6 @@ def render_nodes(outbounds, endpoints, fmt):
     return "application/json; charset=utf-8", dict2json(config)
 
 
-def convert(origin_data, fmt):
-    """把单份订阅原文转成目标格式的 (content_type, body)。失败返回 None。"""
-    outbounds, endpoints = detect_and_parse(origin_data)
-    if not outbounds and not endpoints:
-        return None
-    return render_nodes(outbounds, endpoints, fmt)
-
-
-def render(origin_data, fmt):
-    """命令行用：返回结果字符串。失败返回 None。"""
-    result = convert(origin_data, fmt)
-    return result[1] if result else None
-
-
 # ----------------------- HTTP 服务 -----------------------
 
 class Handler(BaseHTTPRequestHandler):
@@ -299,49 +285,17 @@ def cmd_serve(args):
         server.shutdown()
 
 
-# ----------------------- 命令行转换 -----------------------
-
-def cmd_convert(args):
-    logger.info("开始转换: %s -> %s", args.url, args.format)
-    origin_data = getsub(args.url, args.user_agent)
-    if not origin_data:
-        sys.exit(1)
-
-    result = render(origin_data, args.format)
-    if result is None:
-        logger.error("解析失败，未得到任何节点。")
-        sys.exit(1)
-
-    if args.output:
-        with open(args.output, "w", encoding="utf-8") as f:
-            f.write(result + "\n")
-        logger.info("转换结果已写入: %s", args.output)
-    else:
-        print(result)
-
-
 # ----------------------- 参数解析 -----------------------
 
 def parse_args():
     parser = argparse.ArgumentParser(
-        description="订阅转换：clash/URI/sing-box 订阅 -> sing-box 配置 / URI"
+        description="订阅转换 HTTP 服务：clash/URI/sing-box 订阅 -> sing-box 配置 / URI"
     )
     parser.add_argument("--log-level", default="INFO",
                         choices=["DEBUG", "INFO", "WARNING", "ERROR", "CRITICAL"],
                         help="日志级别，默认 INFO")
 
     sub = parser.add_subparsers(dest="command", required=True)
-
-    # convert: 命令行直接转换
-    p_conv = sub.add_parser("convert", help="命令行直接转换订阅")
-    p_conv.add_argument("url", help="订阅链接 (http/https)")
-    p_conv.add_argument(
-        "-f", "--format", choices=["singbox", "uri"], default="singbox",
-        help="输出格式：singbox (默认) 或 uri",
-    )
-    p_conv.add_argument("-u", "--user-agent", default=None, help="请求订阅的 User-Agent，默认 Mihomo")
-    p_conv.add_argument("-o", "--output", default=None, help="输出到文件，默认打印到标准输出")
-    p_conv.set_defaults(func=cmd_convert)
 
     # serve: HTTP 服务
     p_serve = sub.add_parser("serve", help="启动 HTTP 转换服务")
