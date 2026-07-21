@@ -1,14 +1,15 @@
 import base64
 import json
-import logging
 import urllib.parse
 
-from common import parse_query
+from common import get_logger, parse_query
+
+logger = get_logger(__name__)
 
 
 def uri2singbox(origin_data):
     if not origin_data:
-        logging.warning("订阅内容为空，请检查链接或网络！")
+        logger.warning("订阅内容为空，请检查链接或网络！")
         return None
     # 探测是否整体 base64：非 base64 直接当明文按行处理
     text = origin_data.strip()
@@ -38,7 +39,7 @@ def uri2singbox(origin_data):
             if node:
                 allnode.append(node)
         except Exception as e:
-            logging.warning(f"解析失败，跳过该行: {e}")
+            logger.warning("解析 %s URI 失败，跳过: %s", line[:20], e)
     return allnode
 
 def parse_vmess(uri):

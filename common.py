@@ -1,5 +1,33 @@
 import json
+import logging
 import urllib.parse
+
+
+def setup_logging(level=logging.INFO):
+    """统一配置日志格式：时间戳 / 级别 / 模块 / 消息。
+
+    仅当没有已配置的 handler 时设置，避免重复调用覆盖。
+    """
+    logger = logging.getLogger("singsub")
+    if logger.handlers:
+        return  # 已有 handler，不重复配置
+    logger.setLevel(level)
+    handler = logging.StreamHandler()
+    handler.setFormatter(logging.Formatter(
+        "[%(asctime)s] [%(levelname)-5s] [%(name)s] %(message)s",
+        datefmt="%Y-%m-%d %H:%M:%S",
+    ))
+    logger.addHandler(handler)
+    # 让 urllib3 等第三方库安静一点
+    logging.getLogger("urllib3").setLevel(logging.WARNING)
+
+
+def get_logger(name):
+    """获取 singsub 命名空间下的子 logger。
+
+    使用方式：logger = get_logger(__name__)
+    """
+    return logging.getLogger(f"singsub.{name}")
 
 
 def dict2json(data, indent=2, ensure_ascii=False):

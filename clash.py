@@ -1,10 +1,13 @@
-import logging
 import yaml
+
+from common import get_logger
+
+logger = get_logger(__name__)
 
 
 def clash2singbox(origin_data):
     if not origin_data:
-        logging.warning("订阅内容为空，请检查链接或网络！")
+        logger.warning("订阅内容为空，请检查链接或网络！")
         return None
     data = yaml.safe_load(origin_data)
     origin_node = data["proxies"]

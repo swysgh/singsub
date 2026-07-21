@@ -2,19 +2,23 @@
 import argparse
 import hmac
 import json
+import logging
 import os
 import sys
+import time
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from urllib.parse import urlparse, parse_qs
 
 from fetch import getsub
-from common import dict2json
+from common import setup_logging, get_logger, dict2json
 from clash import clash2singbox
 from uri2sb import uri2singbox
 from sb2uri import singbox2uri
 from assembler import run_script
 
 import yaml
+
+logger = get_logger(__name__)
 
 
 # 启动 HTTP 服务时由 --config 加载
@@ -52,8 +56,8 @@ def detect_and_parse(origin_data):
     try:
         nodes = uri2singbox(origin_data)
         return (nodes or [], [])
-    except Exception:
-        sys.stderr.write("URI 解析失败，订阅格式无法识别\n")
+    except Exception as e:
+        logger.error("URI 解析失败，订阅格式无法识别: %s", e)
         return ([], [])
 
 
@@ -88,7 +92,17 @@ def render(origin_data, fmt):
 
 class Handler(BaseHTTPRequestHandler):
     def log_message(self, fmt, *args):
-        sys.stderr.write("%s - %s\n" % (self.address_string(), fmt % args))
+        """重写 BaseHTTPRequestHandler 的 log_message，改用 singsub 的 logger。
+        
+        原始格式：`self.address_string() - - [date] "request" status size`
+        这里简化记录：method path status size
+        """
+        logger.info("HTTP %s %s -> %s %s", self.command, self.path, fmt % args, "")
+
+    def _log_request(self, code, body_len):
+        """记录请求摘要：方法、路径、状态码、耗时、响应大小。"""
+        elapsed = time.time() - self._start_time
+        logger.info("请求完成: %s %s [%d] (%.2fs, %d 字节)", self.command, self.path, code, elapsed, body_len)
 
     def _respond(self, code, content_type, body):
         data = body.encode("utf-8") if isinstance(body, str) else body
@@ -97,10 +111,14 @@ class Handler(BaseHTTPRequestHandler):
         self.send_header("Content-Length", str(len(data)))
         self.end_headers()
         self.wfile.write(data)
+        self._log_request(code, len(data))
 
     def do_GET(self):
+        self._start_time = time.time()
         parsed = urlparse(self.path)
         segments = [s for s in parsed.path.split("/") if s] # 过滤切割后的空字符串
+
+        logger.info("收到请求: %s %s", self.command, self.path)
 
         # 首页：无 token，仅作存活探测
         if not segments:
@@ -111,6 +129,7 @@ class Handler(BaseHTTPRequestHandler):
         token = segments[0]
         expect_token = CONFIG.get("token", "")
         if not expect_token or not hmac.compare_digest(token, expect_token):
+            logger.warning("token 验证失败: %s", self.address_string())
             self._respond(403, "text/plain; charset=utf-8", "Forbidden: token 错误\n")
             return
 
@@ -134,9 +153,11 @@ class Handler(BaseHTTPRequestHandler):
                 self._respond(404, "text/plain; charset=utf-8", f"未知订阅: {name}\n")
                 return
             targets = [(name, subs[name])]
+            logger.info("请求指定订阅: %s", name)
         else:
             # 不指定 name：合并所有订阅
             targets = list(subs.items())
+            logger.info("请求合并所有订阅 (%d 个)", len(targets))
 
         if not targets:
             self._respond(404, "text/plain; charset=utf-8", "配置文件未定义任何订阅\n")
@@ -154,8 +175,9 @@ class Handler(BaseHTTPRequestHandler):
             if outbounds or endpoints:
                 all_outbounds.extend(outbounds)
                 all_endpoints.extend(endpoints)
+                logger.info("订阅 %s: 解析到 %d outbound + %d endpoint", sub_name, len(outbounds), len(endpoints))
             else:
-                sys.stderr.write(f"订阅 {sub_name} 解析无节点\n")
+                logger.warning("订阅 %s 解析无节点", sub_name)
 
         if not all_outbounds and not all_endpoints:
             self._respond(422, "text/plain; charset=utf-8", "解析失败，未得到任何节点\n")
@@ -164,9 +186,10 @@ class Handler(BaseHTTPRequestHandler):
         result = render_nodes(all_outbounds, all_endpoints, fmt)
 
         if failed:
-            sys.stderr.write(f"部分订阅获取失败: {', '.join(failed)}\n")
+            logger.warning("部分订阅获取失败: %s", ", ".join(failed))
 
         content_type, body = result
+        logger.info("转换完成: %d outbound + %d endpoint -> %s", len(all_outbounds), len(all_endpoints), fmt)
         self._respond(200, content_type, body + "\n")
 
     def _handle_script(self, script_name, qs, fmt, ua):
@@ -180,12 +203,14 @@ class Handler(BaseHTTPRequestHandler):
         reserved = {"script", "format", "ua", "name"}
         args = {k: v[0] for k, v in qs.items() if k not in reserved}
 
+        logger.info("执行脚本: %s (args=%s)", script_name, args)
         try:
             config = run_script(entry, CONFIG.get("subs") or {}, args, CONFIG_DIR, ua)
         except FileNotFoundError as e:
             self._respond(404, "text/plain; charset=utf-8", f"{e}\n")
             return
         except Exception as e:
+            logger.exception("脚本 %s 执行异常", script_name)
             self._respond(500, "text/plain; charset=utf-8", f"脚本执行失败: {e}\n")
             return
 
@@ -195,29 +220,33 @@ class Handler(BaseHTTPRequestHandler):
             if not proxy_nodes:
                 self._respond(422, "text/plain; charset=utf-8", "装配结果无代理节点可转 URI\n")
                 return
+            logger.info("脚本 %s 完成: %d 代理节点转 URI", script_name, len(proxy_nodes))
             self._respond(200, "text/plain; charset=utf-8", singbox2uri(proxy_nodes) + "\n")
         else:
+            logger.info("脚本 %s 完成: 返回 sing-box 配置", script_name)
             self._respond(200, "application/json; charset=utf-8", dict2json(config) + "\n")
 
 
 def load_config(path):
+    logger.info("加载配置文件: %s", path)
     with open(path, "r", encoding="utf-8") as f:
         cfg = json.load(f)
     if "token" not in cfg or not isinstance(cfg["token"], str) or not cfg["token"]:
-        sys.stderr.write("配置文件需配置非空 token 字符串\n")
+        logger.critical("配置文件需配置非空 token 字符串")
         sys.exit(1)
     if "subs" not in cfg or not isinstance(cfg["subs"], dict):
-        sys.stderr.write("配置文件需包含 subs 对象\n")
+        logger.critical("配置文件需包含 subs 对象")
         sys.exit(1)
     scripts = cfg.get("scripts")
     if scripts is not None:
         if not isinstance(scripts, dict):
-            sys.stderr.write("配置文件 scripts 需为对象：脚本名 -> 脚本路径\n")
+            logger.critical("配置文件 scripts 需为对象：脚本名 -> 脚本路径")
             sys.exit(1)
         for key, spath in scripts.items():
             if not isinstance(spath, str):
-                sys.stderr.write(f"脚本 {key} 的值需为脚本路径字符串\n")
+                logger.critical("脚本 %s 的值需为脚本路径字符串", key)
                 sys.exit(1)
+    logger.info("配置文件加载成功，订阅: %d 个，脚本: %d 个", len(cfg.get("subs", {})), len(cfg.get("scripts", {})))
     return cfg
 
 def cmd_serve(args):
@@ -225,34 +254,34 @@ def cmd_serve(args):
     CONFIG = load_config(args.config)
     CONFIG_DIR = os.path.dirname(os.path.abspath(args.config))
     server = ThreadingHTTPServer((args.host, args.port), Handler)
-    print(f"singsub 服务已启动: http://{args.host}:{args.port}/<token>?name=<订阅名>|script=<脚本名>&format=singbox|uri",
-          file=sys.stderr)
-    print(f"已加载订阅: {', '.join(CONFIG['subs'].keys())}", file=sys.stderr)
+    logger.info("singsub 服务已启动: http://%s:%s/<token>?name=<订阅名>|script=<脚本名>&format=singbox|uri", args.host, args.port)
+    logger.info("已加载订阅: %s", ", ".join(CONFIG["subs"].keys()))
     if CONFIG.get("scripts"):
-        print(f"已加载脚本: {', '.join(CONFIG['scripts'].keys())}", file=sys.stderr)
+        logger.info("已加载脚本: %s", ", ".join(CONFIG["scripts"].keys()))
     try:
         server.serve_forever()
     except KeyboardInterrupt:
-        print("\n停止服务", file=sys.stderr)
+        logger.info("收到中断信号，停止服务")
         server.shutdown()
 
 
 # ----------------------- 命令行转换 -----------------------
 
 def cmd_convert(args):
+    logger.info("开始转换: %s -> %s", args.url, args.format)
     origin_data = getsub(args.url, args.user_agent)
     if not origin_data:
         sys.exit(1)
 
     result = render(origin_data, args.format)
     if result is None:
-        print("解析失败，未得到任何节点。", file=sys.stderr)
+        logger.error("解析失败，未得到任何节点。")
         sys.exit(1)
 
     if args.output:
         with open(args.output, "w", encoding="utf-8") as f:
             f.write(result + "\n")
-        print(f"已写入: {args.output}", file=sys.stderr)
+        logger.info("转换结果已写入: %s", args.output)
     else:
         print(result)
 
@@ -263,6 +292,10 @@ def parse_args():
     parser = argparse.ArgumentParser(
         description="订阅转换：clash/URI/sing-box 订阅 -> sing-box 配置 / URI"
     )
+    parser.add_argument("--log-level", default="INFO",
+                        choices=["DEBUG", "INFO", "WARNING", "ERROR", "CRITICAL"],
+                        help="日志级别，默认 INFO")
+
     sub = parser.add_subparsers(dest="command", required=True)
 
     # convert: 命令行直接转换
@@ -288,6 +321,7 @@ def parse_args():
 
 def main():
     args = parse_args()
+    setup_logging(getattr(logging, args.log_level.upper(), logging.INFO))
     args.func(args)
 
 

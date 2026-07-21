@@ -1,7 +1,10 @@
 import base64
 import json
-import logging
 import urllib.parse
+
+from common import get_logger
+
+logger = get_logger(__name__)
 
 
 def _node_to_uri(node):
@@ -208,7 +211,7 @@ def singbox2uri(data):
     elif isinstance(data, list):
         nodes = data
     else:
-        logging.warning("singbox2uri: 输入类型不支持")
+        logger.warning("singbox2uri: 输入类型不支持 (%s)", type(data).__name__)
         return None
 
     lines = []
@@ -219,5 +222,5 @@ def singbox2uri(data):
         if uri:
             lines.append(uri)
         else:
-            logging.warning(f"singbox2uri: 跳过不支持的节点类型 {node.get('type')}")
+            logger.warning("singbox2uri: 跳过不支持的节点 %s (type=%s)", node.get("tag"), node.get("type"))
     return "\n".join(lines)

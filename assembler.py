@@ -14,7 +14,10 @@ import os
 import sys
 import traceback
 
+from common import get_logger
 from fetch import getsub
+
+logger = get_logger(__name__)
 
 
 class LazySubs:
@@ -109,6 +112,6 @@ def run_script(script_path, subs_config, args=None, config_dir=None, ua=None):
     try:
         result = assemble(context)
     except Exception:
-        sys.stderr.write(f"脚本 {path} 执行失败:\n{traceback.format_exc()}")
+        logger.error("脚本 %s 执行失败:\n%s", path, traceback.format_exc())
         raise
     return result

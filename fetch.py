@@ -3,6 +3,10 @@ from urllib.parse import urlparse
 
 import requests
 
+from common import get_logger
+
+logger = get_logger(__name__)
+
 
 def _is_url(s):
     return urlparse(s).scheme in ("http", "https")
@@ -14,12 +18,12 @@ def _read_local_file(path, base_dir):
     try:
         with open(full, "r", encoding="utf-8") as f:
             content = f.read()
-        print(f"成功读取本地文件: {full}")
+        logger.info("成功读取本地文件: %s", full)
         return content
     except FileNotFoundError:
-        print(f"错误：本地文件不存在: {full}")
+        logger.error("本地文件不存在: %s", full)
     except OSError as e:
-        print(f"错误：读取本地文件失败: {full} ({e})")
+        logger.error("读取本地文件失败: %s (%s)", full, e)
     return None
 
 
@@ -33,6 +37,7 @@ def getsub(url, ua, base_dir=None):
         ua = "Mihomo"
 
     headers = {'User-Agent': ua}
+    logger.info("开始拉取订阅: %s (UA=%s)", url, ua)
 
     try:
         # 推荐加上 timeout（超时限制，比如 10 秒），防止请求因网络问题无限期卡死
@@ -41,19 +46,18 @@ def getsub(url, ua, base_dir=None):
         # 这一步很关键：如果 HTTP 状态码不是 2xx（例如 404, 500 等），它会直接抛出 HTTPError 异常
         response.raise_for_status()
 
-        # 修正了原代码的格式化打印
-        print(f"成功获取: {url}")
+        logger.info("成功获取订阅: %s (状态码=%s, %d 字节)", url, response.status_code, len(response.text))
         return response.text
 
     except requests.exceptions.Timeout:
-        print(f"错误：请求 {url} 超时，请检查网络连接或目标服务器响应速度。")
+        logger.error("请求 %s 超时，请检查网络连接或目标服务器响应速度", url)
     except requests.exceptions.ConnectionError:
-        print(f"错误：无法连接到 {url}，请确认网址是否正确或网络是否通畅。")
+        logger.error("无法连接到 %s，请确认网址是否正确或网络是否通畅", url)
     except requests.exceptions.HTTPError as http_err:
-        print(f"HTTP 错误：请求失败，状态码为 {response.status_code}。错误信息：{http_err}")
+        logger.error("HTTP 错误：请求 %s 失败，状态码为 %s (%s)", url, response.status_code, http_err)
     except requests.exceptions.RequestException as err:
         # 捕获其他所有 requests 相关的异常（如代理错误、SSL证书问题等）
-        print(f"请求发生未知错误: {err}")
+        logger.error("请求 %s 发生未知错误: %s", url, err)
 
     # 如果发生异常导致未成功获取，则返回 None
     return None
