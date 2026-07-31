@@ -17,7 +17,7 @@ TEMPLATE = os.path.normpath(
 )
 
 UNLOCK_TAGS = ["google", "ai", "spotify", "github", "youtube"]
-UNLOCK_NODES = ["hkt", "webnx", "grsg", "ynkr", "ynus", "iptw"]
+UNLOCK_NODES = ["hkt", "webnx", "grsg", "ynkr", "ynus", "iptw", "skus"]
 
 
 def add_dns(config, tags):
