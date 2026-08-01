@@ -24,6 +24,13 @@
         "server": "8.8.8.8",
         "server_port": 53,
         "detour": "select"
+      },
+      {
+        "type": "udp",
+        "tag": "dn42-dns",
+        "server": "172.20.0.53",
+        "server_port": 53,
+        "detour": "direct-dn42"
       }
     ],
     "rules": [
@@ -46,6 +53,10 @@
         "domain_suffix": "vivo.com.cn",
         "rule_set": "vivo",
         "action": "reject"
+      },
+      {
+        "domain_suffix": "dn42",
+        "server": "dn42-dns"
       },
       {
         "rule_set": [
