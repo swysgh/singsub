@@ -1,13 +1,14 @@
-package main
+package config
 
 import (
 	"encoding/json"
 	"fmt"
 	"os"
 	"path/filepath"
+
+	"singsub/internal/common"
 )
 
-// Config 对应 config.json 的结构。
 type Config struct {
 	Token   string            `json:"token"`
 	Subs    map[string]string `json:"subs"`
@@ -15,10 +16,8 @@ type Config struct {
 	Shares  map[string]string `json:"shares"`
 }
 
-// loadConfig 加载并校验配置文件。
-// 对应 Python 版 singsub.load_config。
-func loadConfig(path string) (*Config, error) {
-	logInfo("加载配置文件: %s", path)
+func LoadConfig(path string) (*Config, error) {
+	common.LogInfo("加载配置文件: %s", path)
 	b, err := os.ReadFile(path)
 	if err != nil {
 		return nil, fmt.Errorf("读取配置文件失败: %w", err)
@@ -45,18 +44,17 @@ func loadConfig(path string) (*Config, error) {
 		}
 		if cfg.Scripts != nil {
 			if _, ok := cfg.Scripts[scriptName]; !ok {
-				logWarn("分享 %s 引用的脚本 %s 未在 scripts 中定义", key, scriptName)
+				common.LogWarn("分享 %s 引用的脚本 %s 未在 scripts 中定义", key, scriptName)
 			}
 		}
 	}
 
-	logInfo("配置文件加载成功，订阅: %d 个，脚本: %d 个，分享链接: %d 个",
+	common.LogInfo("配置文件加载成功，订阅: %d 个，脚本: %d 个，分享链接: %d 个",
 		len(cfg.Subs), len(cfg.Scripts), len(cfg.Shares))
 	return &cfg, nil
 }
 
-// configDir 返回配置文件所在目录的绝对路径。
-func configDir(configPath string) string {
+func ConfigDir(configPath string) string {
 	abs, err := filepath.Abs(configPath)
 	if err != nil {
 		return filepath.Dir(configPath)

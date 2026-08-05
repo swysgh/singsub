@@ -1,23 +1,20 @@
-package main
+package clash
 
 import (
-	"os"
 	"strings"
 
-	"gopkg.in/yaml.v3"
+	"singsub/internal/common"
 )
 
-// clash2singbox 把 Clash YAML 配置转成 sing-box 节点列表。
-// 对应 Python 版 clash.clash2singbox。
-func clash2singbox(originData string) []map[string]any {
+func Clash2Singbox(originData string) []map[string]any {
 	if originData == "" {
-		logWarn("订阅内容为空，请检查链接或网络！")
+		common.LogWarn("订阅内容为空，请检查链接或网络！")
 		return nil
 	}
 
 	var data map[string]any
-	if err := yaml.Unmarshal([]byte(originData), &data); err != nil {
-		logError("Clash YAML 解析失败: %s", err)
+	if err := common.YAMLUnmarshal(originData, &data); err != nil {
+		common.LogError("Clash YAML 解析失败: %s", err)
 		return nil
 	}
 
@@ -40,25 +37,6 @@ func clash2singbox(originData string) []map[string]any {
 	return allnode
 }
 
-// checkFalse 对应 Python checkfalse：字符串 "false" 视为假
-func checkFalse(v any) bool {
-	if v == nil {
-		return false
-	}
-	s := strings.ToLower(strings.TrimSpace(toString(v)))
-	return s == "false"
-}
-
-// checkTrue 对应 Python checktrue：字符串 "true" 视为真
-func checkTrue(v any) bool {
-	if v == nil {
-		return false
-	}
-	s := strings.ToLower(strings.TrimSpace(toString(v)))
-	return s == "true"
-}
-
-// toIntAny 从 any 取 int（yaml 解析出的可能是 int / int64 / float64）
 func toIntAny(v any) int {
 	switch n := v.(type) {
 	case int:
@@ -68,52 +46,9 @@ func toIntAny(v any) int {
 	case float64:
 		return int(n)
 	case string:
-		return toIntStr(n)
+		return common.ToIntStr(n)
 	}
 	return 0
-}
-
-// pemOrPath 判断值是 PEM 内容还是文件路径
-func pemOrPath(value any) (pem, path string) {
-	s := toString(value)
-	if strings.HasPrefix(strings.TrimLeft(s, " "), "-----BEGIN") {
-		return s, ""
-	}
-	return "", s
-}
-
-// dialFields 处理 smux / brutal / detour 等拨号相关字段
-func dialFields(onenode, node map[string]any) {
-	if checkFalse(onenode["udp"]) {
-		node["network"] = "tcp"
-	}
-	if smux, ok := onenode["smux"].(map[string]any); ok {
-		if !checkFalse(smux["enabled"]) {
-			node["smux"] = map[string]any{
-				"enabled":         true,
-				"protocol":        firstNonEmpty(toString(smux["protocol"]), "smux"),
-				"max_connections": toIntAnyDefault(smux["max-connections"], 4),
-				"min_streams":     toIntAnyDefault(smux["min-streams"], 4),
-				"max_streams":     toIntAnyDefault(smux["max-streams"], 0),
-				"padding":         checkTrue(smux["padding"]),
-			}
-			if checkTrue(onenode["padding"]) {
-				node["padding"] = true
-			}
-			if brutal, ok := smux["brutal-opts"].(map[string]any); ok {
-				if checkTrue(brutal["enabled"]) {
-					node["brutal"] = map[string]any{
-						"enabled":  true,
-						"up_mbps":  toIntAnyDefault(brutal["up"], 100),
-						"down_mbps": toIntAnyDefault(brutal["down"], 100),
-					}
-				}
-			}
-		}
-	}
-	if detour := toString(onenode["dialer-proxy"]); detour != "" {
-		node["detour"] = detour
-	}
 }
 
 func toIntAnyDefault(v any, def int) int {
@@ -124,29 +59,69 @@ func toIntAnyDefault(v any, def int) int {
 	return i
 }
 
-// clashTLS 处理 TLS 相关字段
+func pemOrPath(value any) (pem, path string) {
+	s := common.ToString(value)
+	if len(s) > 0 && s[0] == '-' {
+		return s, ""
+	}
+	return "", s
+}
+
+func dialFields(onenode, node map[string]any) {
+	if common.CheckFalse(onenode["udp"]) {
+		node["network"] = "tcp"
+	}
+	if smux, ok := onenode["smux"].(map[string]any); ok {
+		if !common.CheckFalse(smux["enabled"]) {
+			node["smux"] = map[string]any{
+				"enabled":         true,
+				"protocol":        common.FirstNonEmpty(common.ToString(smux["protocol"]), "smux"),
+				"max_connections": toIntAnyDefault(smux["max-connections"], 4),
+				"min_streams":     toIntAnyDefault(smux["min-streams"], 4),
+				"max_streams":     toIntAnyDefault(smux["max-streams"], 0),
+				"padding":         common.CheckTrue(smux["padding"]),
+			}
+			if common.CheckTrue(onenode["padding"]) {
+				node["padding"] = true
+			}
+			if brutal, ok := smux["brutal-opts"].(map[string]any); ok {
+				if common.CheckTrue(brutal["enabled"]) {
+					node["brutal"] = map[string]any{
+						"enabled":    true,
+						"up_mbps":    toIntAnyDefault(brutal["up"], 100),
+						"down_mbps": toIntAnyDefault(brutal["down"], 100),
+					}
+				}
+			}
+		}
+	}
+	if detour := common.ToString(onenode["dialer-proxy"]); detour != "" {
+		node["detour"] = detour
+	}
+}
+
 func clashTLS(onenode, node map[string]any) {
 	tls := map[string]any{}
-	if checkTrue(onenode["tls"]) {
+	if common.CheckTrue(onenode["tls"]) {
 		tls["enabled"] = true
 	}
-	if sn := toString(onenode["servername"]); sn != "" {
+	if sn := common.ToString(onenode["servername"]); sn != "" {
 		tls["server_name"] = sn
 	}
 	if alpn := onenode["alpn"]; alpn != nil {
 		tls["alpn"] = alpn
 	}
-	if checkTrue(onenode["skip-cert-verify"]) {
+	if common.CheckTrue(onenode["skip-cert-verify"]) {
 		tls["insecure"] = true
 	}
-	if utls := toString(onenode["client-fingerprint"]); utls != "" {
+	if utls := common.ToString(onenode["client-fingerprint"]); utls != "" {
 		tls["utls"] = map[string]any{"enabled": true, "fingerprint": utls}
 	}
 	if reality, ok := onenode["reality-opts"].(map[string]any); ok {
 		tls["reality"] = map[string]any{
 			"enabled":    true,
-			"public_key": toString(reality["public-key"]),
-			"short_id":   toString(reality["short-id"]),
+			"public_key": common.ToString(reality["public-key"]),
+			"short_id":   common.ToString(reality["short-id"]),
 		}
 	}
 	if cert := onenode["certificate"]; cert != nil {
@@ -170,7 +145,6 @@ func clashTLS(onenode, node map[string]any) {
 	}
 }
 
-// clashV2RayTransport 处理传输层（ws/grpc/h2/http）
 func clashV2RayTransport(onenode, node map[string]any) {
 	network, _ := onenode["network"].(string)
 	switch network {
@@ -193,7 +167,7 @@ func clashV2RayTransport(onenode, node map[string]any) {
 		if ed := wsOpts["max-early-data"]; ed != nil {
 			transport["max_early_data"] = toIntAny(ed)
 		}
-		if h := toString(wsOpts["early-data-header-name"]); h != "" {
+		if h := common.ToString(wsOpts["early-data-header-name"]); h != "" {
 			transport["early_data_header_name"] = h
 		}
 		node["transport"] = transport
@@ -203,7 +177,7 @@ func clashV2RayTransport(onenode, node map[string]any) {
 			grpcOpts = map[string]any{}
 		}
 		transport := map[string]any{"type": "grpc"}
-		if sn := toString(grpcOpts["grpc-service-name"]); sn != "" {
+		if sn := common.ToString(grpcOpts["grpc-service-name"]); sn != "" {
 			transport["service_name"] = sn
 		}
 		node["transport"] = transport
@@ -225,10 +199,10 @@ func clashV2RayTransport(onenode, node map[string]any) {
 				transport["host"] = h
 			}
 		}
-		if path := toString(opts["path"]); path != "" {
+		if path := common.ToString(opts["path"]); path != "" {
 			transport["path"] = path
 		}
-		if method := toString(opts["method"]); method != "" {
+		if method := common.ToString(opts["method"]); method != "" {
 			transport["method"] = method
 		}
 		if headers := opts["headers"]; headers != nil {
@@ -238,7 +212,6 @@ func clashV2RayTransport(onenode, node map[string]any) {
 	}
 }
 
-// clashNodeToSingbox 把单个 clash 节点转成 sing-box 节点
 func clashNodeToSingbox(onenode map[string]any) map[string]any {
 	ntype, _ := onenode["type"].(string)
 	name, _ := onenode["name"].(string)
@@ -252,12 +225,12 @@ func clashNodeToSingbox(onenode map[string]any) map[string]any {
 			"type":        "shadowsocks",
 			"server":      server,
 			"server_port": port,
-			"method":      toString(onenode["cipher"]),
-			"password":    toString(onenode["password"]),
+			"method":      common.ToString(onenode["cipher"]),
+			"password":    common.ToString(onenode["password"]),
 		}
-		if checkTrue(onenode["udp-over-tcp"]) {
+		if common.CheckTrue(onenode["udp-over-tcp"]) {
 			version := onenode["udp-over-tcp-version"]
-			verStr := toString(version)
+			verStr := common.ToString(version)
 			if verStr == "1" || verStr == "2" {
 				node["udp_over_tcp"] = map[string]any{"enabled": true, "version": toIntAny(version)}
 			} else {
@@ -273,9 +246,9 @@ func clashNodeToSingbox(onenode map[string]any) map[string]any {
 			"type":        "vless",
 			"server":      server,
 			"server_port": port,
-			"uuid":        toString(onenode["uuid"]),
+			"uuid":        common.ToString(onenode["uuid"]),
 		}
-		if flow := toString(onenode["flow"]); flow != "" {
+		if flow := common.ToString(onenode["flow"]); flow != "" {
 			node["flow"] = flow
 		}
 		if pe := onenode["packet_encoding"]; pe != nil {
@@ -292,13 +265,13 @@ func clashNodeToSingbox(onenode map[string]any) map[string]any {
 			"type":        "vmess",
 			"server":      server,
 			"server_port": port,
-			"uuid":        toString(onenode["uuid"]),
+			"uuid":        common.ToString(onenode["uuid"]),
 			"alter_id":    toIntAnyDefault(onenode["alter-id"], 0),
 		}
 		if pe := onenode["packet_encoding"]; pe != nil {
 			node["packet_encoding"] = pe
 		}
-		if cipher := toString(onenode["cipher"]); cipher != "" {
+		if cipher := common.ToString(onenode["cipher"]); cipher != "" {
 			node["security"] = cipher
 		}
 		dialFields(onenode, node)
@@ -312,7 +285,7 @@ func clashNodeToSingbox(onenode map[string]any) map[string]any {
 			"type":        "trojan",
 			"server":      server,
 			"server_port": port,
-			"password":    toString(onenode["password"]),
+			"password":    common.ToString(onenode["password"]),
 		}
 		dialFields(onenode, node)
 		clashTLS(onenode, node)
@@ -325,7 +298,6 @@ func clashNodeToSingbox(onenode map[string]any) map[string]any {
 	return nil
 }
 
-// clashWireguardToSingbox 处理 wireguard 节点
 func clashWireguardToSingbox(onenode map[string]any, name, server string, port int) map[string]any {
 	node := map[string]any{
 		"tag":         name,
@@ -334,12 +306,11 @@ func clashWireguardToSingbox(onenode map[string]any, name, server string, port i
 		"server_port": port,
 	}
 
-	privateKey := firstNonEmpty(toString(onenode["private-key"]), toString(onenode["private_key"]))
+	privateKey := common.FirstNonEmpty(common.ToString(onenode["private-key"]), common.ToString(onenode["private_key"]))
 	if privateKey != "" {
 		node["private_key"] = privateKey
 	}
 
-	// local_address
 	var ip any
 	if v, ok := onenode["ip"]; ok {
 		ip = v
@@ -361,7 +332,7 @@ func clashWireguardToSingbox(onenode map[string]any, name, server string, port i
 		node["local_address"] = []any{}
 	}
 
-	publicKey := firstNonEmpty(toString(onenode["public-key"]), toString(onenode["public_key"]))
+	publicKey := common.FirstNonEmpty(common.ToString(onenode["public-key"]), common.ToString(onenode["public_key"]))
 	if publicKey == "" {
 		return nil
 	}
@@ -372,7 +343,6 @@ func clashWireguardToSingbox(onenode map[string]any, name, server string, port i
 		"public_key": publicKey,
 	}
 
-	// allowed_ips
 	var allowed any
 	if v, ok := onenode["allowed-ips"]; ok {
 		allowed = v
@@ -390,11 +360,11 @@ func clashWireguardToSingbox(onenode map[string]any, name, server string, port i
 		peer["allowed_ips"] = []any{v}
 	}
 
-	if psk := firstNonEmpty(toString(onenode["pre-shared-key"]), toString(onenode["pre_shared_key"])); psk != "" {
+	if psk := common.FirstNonEmpty(common.ToString(onenode["pre-shared-key"]), common.ToString(onenode["pre_shared_key"])); psk != "" {
 		peer["pre_shared_key"] = psk
 	}
-	if keepalive := firstNonEmpty(toString(onenode["keepalive"]), toString(onenode["persistent_keepalive_interval"])); keepalive != "" {
-		peer["persistent_keepalive_interval"] = toIntStr(keepalive)
+	if keepalive := common.FirstNonEmpty(common.ToString(onenode["keepalive"]), common.ToString(onenode["persistent_keepalive_interval"])); keepalive != "" {
+		peer["persistent_keepalive_interval"] = common.ToIntStr(keepalive)
 	}
 
 	node["peers"] = []any{peer}
@@ -411,7 +381,7 @@ func clashWireguardToSingbox(onenode map[string]any, name, server string, port i
 			parts := strings.Split(v, ",")
 			var rs []any
 			for _, p := range parts {
-				rs = append(rs, toIntStr(p))
+				rs = append(rs, common.ToIntStr(p))
 			}
 			node["reserved"] = rs
 		}
@@ -434,6 +404,3 @@ func clashWireguardToSingbox(onenode map[string]any, name, server string, port i
 	}
 	return node
 }
-
-// 确保 os 被引用（未来扩展可能用）
-var _ = os.Getenv
