@@ -6,8 +6,8 @@
     "rtx.al": "https://another.example.com/sub"
   },
   "scripts": {
-    "desktop": "substore/desktop.py",
-    "homeserver": "substore/homeserver.py"
+    "desktop": "script/desktop.js",
+    "homeserver": "script/homeserver.js"
   },
   "shares": {
     "share_abc123": "homeserver",
