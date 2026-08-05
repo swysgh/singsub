@@ -9,7 +9,7 @@ import (
 	"strings"
 	"time"
 
-	"singsub/internal/common"
+	"singsub/common"
 )
 
 func IsURL(s string) bool {

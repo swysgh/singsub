@@ -3,7 +3,7 @@ package clash
 import (
 	"strings"
 
-	"singsub/internal/common"
+	"singsub/common"
 )
 
 func Clash2Singbox(originData string) []map[string]any {

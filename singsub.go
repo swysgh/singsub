@@ -10,12 +10,12 @@ import (
 	"strings"
 	"time"
 
-	"singsub/internal/assembler"
-	"singsub/internal/common"
-	"singsub/internal/config"
-	"singsub/internal/detect"
-	"singsub/internal/fetch"
-	"singsub/internal/sb2uri"
+	"singsub/assembler"
+	"singsub/common"
+	"singsub/config"
+	"singsub/detect"
+	"singsub/fetch"
+	"singsub/sb2uri"
 )
 
 var (

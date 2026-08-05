@@ -4,10 +4,10 @@ import (
 	"encoding/json"
 	"strings"
 
-	"singsub/internal/clash"
-	"singsub/internal/common"
-	"singsub/internal/sb2uri"
-	"singsub/internal/uri2sb"
+	"singsub/clash"
+	"singsub/common"
+	"singsub/sb2uri"
+	"singsub/uri2sb"
 )
 
 func DetectAndParse(originData string) (outbounds, endpoints []map[string]any) {

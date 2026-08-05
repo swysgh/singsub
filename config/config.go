@@ -6,7 +6,7 @@ import (
 	"os"
 	"path/filepath"
 
-	"singsub/internal/common"
+	"singsub/common"
 )
 
 type Config struct {

@@ -6,7 +6,7 @@ import (
 	"net/url"
 	"strings"
 
-	"singsub/internal/common"
+	"singsub/common"
 )
 
 func URI2Singbox(originData string) []map[string]any {

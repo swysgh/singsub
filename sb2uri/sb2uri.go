@@ -4,7 +4,7 @@ import (
 	"encoding/base64"
 	"strings"
 
-	"singsub/internal/common"
+	"singsub/common"
 )
 
 func Singbox2URI(data any) string {

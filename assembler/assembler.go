@@ -10,9 +10,9 @@ import (
 
 	"github.com/dop251/goja"
 
-	"singsub/internal/common"
-	"singsub/internal/detect"
-	"singsub/internal/fetch"
+	"singsub/common"
+	"singsub/detect"
+	"singsub/fetch"
 )
 
 type Assembler struct {
