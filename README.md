@@ -240,7 +240,7 @@ singsub/
 ## 编译
 
 ```bash
-go build -o singsub ./cmd/singsub/
+go build -o singsub .
 ```
 
 无 CGO 依赖，可交叉编译。goja 和 yaml.v3 编译进二进制，部署只需单个可执行文件。
