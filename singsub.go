@@ -213,13 +213,10 @@ func handleScript(w http.ResponseWriter, scriptName string, qs map[string]string
 	if fmtStr == "uri" {
 		var proxyNodes []any
 		for _, key := range []string{"outbounds", "endpoints"} {
-			if nodes, ok := config[key].([]any); ok {
-				for _, o := range nodes {
-					if m, ok := o.(map[string]any); ok {
-						if _, ok := m["server"]; ok {
-							proxyNodes = append(proxyNodes, m)
-						}
-					}
+			nodes, _ := config[key].([]any)
+			for _, o := range nodes {
+				if m, ok := o.(map[string]any); ok && isProxyNode(m) {
+					proxyNodes = append(proxyNodes, m)
 				}
 			}
 		}
@@ -240,6 +237,16 @@ func handleScript(w http.ResponseWriter, scriptName string, qs map[string]string
 		return
 	}
 	writeBody(w, http.StatusOK, "application/json; charset=utf-8", body+"\n", rl)
+}
+
+// isProxyNode 判断装配结果是否为可转 URI 的代理节点：常规 outbound 带 server，
+// wireguard endpoint 无 server，但其 peers[0] 承载地址与端口
+func isProxyNode(node map[string]any) bool {
+	if server, ok := node["server"].(string); ok && server != "" {
+		return true
+	}
+	peers, _ := node["peers"].([]any)
+	return len(peers) > 0
 }
 
 func writeText(w http.ResponseWriter, code int, body string) {

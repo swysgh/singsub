@@ -116,7 +116,7 @@ http://host:port/<share_key>                            ← 分享链接（免 t
 
 | 输入格式 | 识别方式 | 处理 |
 |---|---|---|
-| **sing-box JSON** | 以 `{` 开头，含 `outbounds` 字段 | 分别提取 `outbounds` 和 `endpoints` |
+| **sing-box JSON** | 以 `{` 开头，含 `outbounds` 或 `endpoints` 字段 | 分别提取 `outbounds` 和 `endpoints` |
 | **Clash YAML** | 含 `proxies` 字段 | `clash2singbox` 转换，全部归入 `outbounds` |
 | **URI 列表** | 以上都不匹配 | 按行识别 `ss://` / `vmess://` / `vless://` / `trojan://` / `wireguard://` |
 
@@ -128,7 +128,7 @@ http://host:port/<share_key>                            ← 分享链接（免 t
 | VMess | `vmess://` | `type: vmess` | `vmess` |
 | VLESS | `vless://` | `type: vless` | `vless` |
 | Trojan | `trojan://` | `type: trojan` | `trojan` |
-| WireGuard | `wireguard://` | `type: wireguard` | `wireguard`（endpoint） |
+| WireGuard | `wireguard://` | `type: wireguard` | `wireguard` |
 
 ---
 
@@ -197,8 +197,8 @@ $content = JSON.stringify(config, null, 2);
 ```javascript
 function assemble(context) {
     const subs = context.subs;
-    // subs["自建"] 返回 [outbounds, endpoints]，取 [0] 得 outbounds
-    const proxies = subs["自建"][0];
+    // subs["自建"] 返回 {outbounds, endpoints}，取 .outbounds 得节点
+    const proxies = subs["自建"].outbounds;
 
     const config = { outbounds: [{ type: "selector", tag: "select", outbounds: [] }] };
     config.outbounds.push(...proxies);
@@ -210,7 +210,7 @@ function assemble(context) {
 ```
 
 `context` 包含：
-- `context.subs`：订阅对象，`subs["名"]` 返回 `[outbounds, endpoints]`，`subs.get("名")` 安全取
+- `context.subs`：订阅对象，`subs["名"]` 返回 `{outbounds, endpoints}`，`subs.get("名")` 安全取（未知名称返回两个空数组），`subs.keys()` 列出全部订阅名
 - `context.args`：查询参数 dict
 - `context.config_dir`：配置文件所在目录
 
@@ -266,4 +266,4 @@ A: 不需要。脚本基于 mtime 缓存，修改文件后下次请求自动加�
 A: 目前 `platform` 参数被忽略，总是返回 sing-box 节点数组（因为引擎本身就是 sing-box 格式）。这是与原 Sub-Store 的差异——Sub-Store 会按 platform 转换，这里直接给 sing-box 节点。
 
 **Q: WireGuard 节点如何处理？**
-A: sing-box JSON 输入的 `endpoints` 单独提取；Clash/URI 输入的 wireguard 归入 `outbounds`。`format=uri` 输出时 wireguard 节点支持转 `wireguard://` URI。
+A: sing-box JSON 输入的 `endpoints` 单独提取并原样透传（仅含 `endpoints` 而无 `outbounds` 的配置也能识别）；Clash/URI 输入的 wireguard 归入 `outbounds`。`format=uri` 输出时两种形状都支持转 `wireguard://` URI：outbound 用 `server`/`server_port`/`local_address`，endpoint 用 `peers[0].address`/`peers[0].port` 和 `address`。URI 反向解析统一产出 `outbounds` 形状。

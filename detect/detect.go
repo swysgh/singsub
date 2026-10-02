@@ -16,7 +16,9 @@ func DetectAndParse(originData string) (outbounds, endpoints []map[string]any) {
 	if strings.HasPrefix(stripped, "{") {
 		var config map[string]any
 		if err := json.Unmarshal([]byte(originData), &config); err == nil {
-			if _, ok := config["outbounds"]; ok {
+			_, hasOutbounds := config["outbounds"]
+			_, hasEndpoints := config["endpoints"]
+			if hasOutbounds || hasEndpoints {
 				outbounds = toMapSlice(config["outbounds"])
 				endpoints = toMapSlice(config["endpoints"])
 				return outbounds, endpoints

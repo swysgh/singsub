@@ -11,11 +11,9 @@ func Singbox2URI(data any) string {
 	var nodes []any
 	switch v := data.(type) {
 	case map[string]any:
-		if ob, ok := v["outbounds"]; ok {
-			if list, ok := ob.([]any); ok {
-				nodes = list
-			}
-		} else {
+		nodes = appendMapSlice(nodes, v["outbounds"])
+		nodes = appendMapSlice(nodes, v["endpoints"])
+		if len(nodes) == 0 {
 			nodes = []any{v}
 		}
 	case []any:
@@ -39,6 +37,14 @@ func Singbox2URI(data any) string {
 		}
 	}
 	return strings.Join(lines, "\n")
+}
+
+func appendMapSlice(dst []any, v any) []any {
+	list, ok := v.([]any)
+	if !ok {
+		return dst
+	}
+	return append(dst, list...)
 }
 
 func nodeToURI(node map[string]any) string {
@@ -256,13 +262,27 @@ func wireguardToURI(node map[string]any, server string, port int, fragment strin
 	}
 	peer, _ := peers[0].(map[string]any)
 	publicKey, _ := peer["public_key"].(string)
+	if publicKey == "" {
+		return ""
+	}
+
+	// endpoint 没有 server/server_port，地址与端口在 peers[0] 上
+	if server == "" {
+		server, _ = peer["address"].(string)
+	}
+	if port == 0 {
+		port = common.ToInt(peer["port"])
+	}
+	if server == "" || port == 0 {
+		return ""
+	}
 
 	q := &queryBuilder{}
 	if pk, ok := node["private_key"].(string); ok && pk != "" {
 		q.add("private_key", pk)
 	}
-	if la, ok := node["local_address"].([]any); ok && len(la) > 0 {
-		q.add("address", common.JoinAny(la, ","))
+	if addr := wireguardLocalAddress(node); addr != "" {
+		q.add("address", addr)
 	}
 	if allowed, ok := peer["allowed_ips"].([]any); ok && len(allowed) > 0 {
 		q.add("allowed_ips", common.JoinAny(allowed, ","))
@@ -286,4 +306,14 @@ func wireguardToURI(node map[string]any, server string, port int, fragment strin
 		q.add("dns", common.JoinAny(dns, ","))
 	}
 	return "wireguard://" + common.QuoteAll(publicKey) + "@" + server + ":" + common.Itoa(port) + q.String() + fragment
+}
+
+// wireguard outbound 用 local_address 数组，endpoint 用 address（字符串或数组）
+func wireguardLocalAddress(node map[string]any) string {
+	if la := node["local_address"]; la != nil {
+		if s := common.JoinAny(la, ","); s != "" {
+			return s
+		}
+	}
+	return common.JoinAny(node["address"], ",")
 }
