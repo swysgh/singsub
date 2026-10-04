@@ -106,6 +106,12 @@ func handleHTTP(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// 浏览器自动请求 favicon.ico，直接返回 404 且不产生 token 告警日志
+	if segs[0] == "favicon.ico" {
+		w.WriteHeader(http.StatusNotFound)
+		return
+	}
+
 	key := segs[0]
 	qs := common.ParseQuery(r.URL.RawQuery)
 	fmtStr := qs["format"]
