@@ -69,14 +69,15 @@ type RequestLogger struct {
 	start  time.Time
 	method string
 	path   string
+	client string
 }
 
-func NewRequestLogger(method, path string) *RequestLogger {
-	return &RequestLogger{start: time.Now(), method: method, path: path}
+func NewRequestLogger(method, path, client string) *RequestLogger {
+	return &RequestLogger{start: time.Now(), method: method, path: path, client: client}
 }
 
 func (r *RequestLogger) Done(code int, bodyLen int) {
-	LogInfo("请求完成: %s %s [%d] (%.2fs, %d 字节)", r.method, r.path, code, time.Since(r.start).Seconds(), bodyLen)
+	LogInfo("请求完成: %s %s [%d] client=%s (%.2fs, %d 字节)", r.method, r.path, code, r.client, time.Since(r.start).Seconds(), bodyLen)
 }
 
 // --- JSON ---

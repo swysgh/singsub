@@ -5,6 +5,7 @@ import (
 	"errors"
 	"flag"
 	"fmt"
+	"net"
 	"net/http"
 	"os"
 	"strings"
@@ -68,9 +69,29 @@ func main() {
 	}
 }
 
+// clientIP 从 X-Real-IP / X-Forwarded-For 提取真实客户端 IP，适用于反向代理场景。
+// 信任顺序: X-Real-IP > X-Forwarded-For 第一个 > RemoteAddr
+func clientIP(r *http.Request) string {
+	if ip := strings.TrimSpace(r.Header.Get("X-Real-IP")); ip != "" {
+		return ip
+	}
+	if xff := r.Header.Get("X-Forwarded-For"); xff != "" {
+		parts := strings.Split(xff, ",")
+		if len(parts) > 0 {
+			return strings.TrimSpace(parts[0])
+		}
+	}
+	host, _, err := net.SplitHostPort(r.RemoteAddr)
+	if err != nil {
+		return r.RemoteAddr
+	}
+	return host
+}
+
 func handleHTTP(w http.ResponseWriter, r *http.Request) {
-	rl := common.NewRequestLogger(r.Method, r.URL.Path)
-	common.LogInfo("收到请求: %s %s", r.Method, r.URL.Path)
+	cip := clientIP(r)
+	rl := common.NewRequestLogger(r.Method, r.URL.Path, cip)
+	common.LogInfo("收到请求: %s %s (client=%s)", r.Method, r.URL.Path, cip)
 
 	path := strings.TrimPrefix(r.URL.Path, "/")
 	segments := strings.Split(path, "/")
@@ -107,7 +128,7 @@ func handleHTTP(w http.ResponseWriter, r *http.Request) {
 
 	expectToken := gConfig.Token
 	if expectToken == "" || subtle.ConstantTimeCompare([]byte(key), []byte(expectToken)) != 1 {
-		common.LogWarn("token 验证失败: %s", r.RemoteAddr)
+		common.LogWarn("token 验证失败: %s", cip)
 		writeText(w, http.StatusForbidden, "Forbidden: token 错误\n")
 		return
 	}
