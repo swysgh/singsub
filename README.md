@@ -243,7 +243,49 @@ singsub/
 go build -o singsub .
 ```
 
-无 CGO 依赖，可交叉编译。goja 和 yaml.v3 编译进二进制，部署只需单个可执行文件。
+无 CGO 依赖,可交叉编译。goja 和 yaml.v3 编译进二进制,部署只需单个可执行文件。
+
+---
+
+## Docker 部署
+
+### 直接构建运行
+
+```bash
+# 构建镜像
+docker build -t singsub:latest .
+
+# 运行(配置、节点文件、脚本均通过卷挂载提供)
+docker run -d --name singsub \
+  -p 127.0.0.1:8080:8080 \
+  -v "$PWD/config.json:/app/config.json:ro" \
+  -v "$PWD/node:/app/node:ro" \
+  -v "$PWD/script:/app/script:ro" \
+  singsub:latest
+```
+
+### docker compose
+
+仓库自带 `docker-compose.yml`:
+
+```bash
+docker compose up -d
+docker compose logs -f
+```
+
+### 镜像说明
+
+- **多阶段构建**:`golang:1.25-alpine` 编译 → `alpine:3.23` 运行,最终镜像只含一个静态二进制
+- **纯静态二进制**(`CGO_ENABLED=0`),不依赖 glibc/musl
+- **非 root 运行**(uid/gid 1000),`HEALTHCHECK` 探测 `GET /`
+- **配置不打进镜像**:`config.json` 含 token 与订阅凭据,通过 `.dockerignore` 排除,
+  运行时以只读卷挂载;`node/`、`script/` 同理
+
+> ⚠️ 注意 `config.json` 里 `subs` / `scripts` 的路径。容器内挂载点是 `/app/node` 和
+> `/app/script`,所以配置里要写成容器内路径,例如
+> `"/app/node/selfbuilt.json"`、`"/app/script/desktop.js"`(而不是宿主机上的
+> `/zfspool/share/nas/config/singsub/...`)。或者挂载到与宿主机一致的绝对路径上,
+> 这样原配置不用改。
 
 ---
 

@@ -1,0 +1,13 @@
+.git
+.github
+.gitignore
+Dockerfile
+docker-compose.yml
+
+# 配置含 token 与订阅凭据，绝不进镜像
+config.json
+
+# 构建产物
+singsub
+*.exe
+singsub-*

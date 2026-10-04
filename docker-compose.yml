@@ -1,0 +1,13 @@
+services:
+  singsub:
+    build: .
+    image: singsub:latest
+    container_name: singsub
+    restart: unless-stopped
+    ports:
+      - "127.0.0.1:8080:8080"
+    volumes:
+      # config.json 含 token，用只读挂载
+      - ./config.json:/app/config.json:ro
+      - ./node:/app/node:ro
+      - ./script:/app/script:ro
