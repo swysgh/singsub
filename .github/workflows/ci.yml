@@ -1,0 +1,36 @@
+name: CI
+
+on:
+  push:
+    branches:
+      - '**'
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    name: Test
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version-file: 'go.mod'
+          cache: true
+
+      - name: Build
+        run: go build -buildvcs=false ./...
+
+      - name: Vet
+        run: go vet -buildvcs=false ./...
+
+      - name: gofmt clean
+        run: test -z "$(gofmt -l .)"
+
+      - name: Test
+        run: go test ./... -v

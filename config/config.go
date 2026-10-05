@@ -5,15 +5,46 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"time"
 
 	"singsub/common"
 )
 
 type Config struct {
-	Token   string            `json:"token"`
-	Subs    map[string]string `json:"subs"`
-	Scripts map[string]string `json:"scripts"`
-	Shares  map[string]string `json:"shares"`
+	Token           string            `json:"token"`
+	Subs            map[string]string `json:"subs"`
+	Scripts         map[string]string `json:"scripts"`
+	Shares          map[string]string `json:"shares"`
+	ScriptTimeoutMs int               `json:"script_timeout_ms"`
+	FetchTimeoutMs  int               `json:"fetch_timeout_ms"`
+	MaxBodyBytes    int64             `json:"max_body_bytes"`
+}
+
+const (
+	DefaultScriptTimeoutMs = 5000
+	DefaultFetchTimeoutMs  = 15000
+	DefaultMaxBodyBytes    = 32 << 20 // 32 MiB
+)
+
+func (c *Config) ScriptTimeout() time.Duration {
+	if c.ScriptTimeoutMs <= 0 {
+		return time.Duration(DefaultScriptTimeoutMs) * time.Millisecond
+	}
+	return time.Duration(c.ScriptTimeoutMs) * time.Millisecond
+}
+
+func (c *Config) FetchTimeout() time.Duration {
+	if c.FetchTimeoutMs <= 0 {
+		return time.Duration(DefaultFetchTimeoutMs) * time.Millisecond
+	}
+	return time.Duration(c.FetchTimeoutMs) * time.Millisecond
+}
+
+func (c *Config) MaxBodyLimit() int64 {
+	if c.MaxBodyBytes <= 0 {
+		return DefaultMaxBodyBytes
+	}
+	return c.MaxBodyBytes
 }
 
 func LoadConfig(path string) (*Config, error) {

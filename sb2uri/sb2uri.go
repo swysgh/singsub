@@ -174,13 +174,13 @@ func ssToURI(node map[string]any, server string, port int, fragment string) stri
 
 func vmessToURI(node map[string]any, server string, port int, tag string) string {
 	cfg := map[string]any{
-		"v":   "2",
-		"ps":  tag,
-		"add": server,
+		"v":    "2",
+		"ps":   tag,
+		"add":  server,
 		"port": common.Itoa(port),
-		"id":  common.ToString(node["uuid"]),
-		"aid": common.Itoa(common.ToIntDefault(node["alter_id"], 0)),
-		"net": "tcp",
+		"id":   common.ToString(node["uuid"]),
+		"aid":  common.Itoa(common.ToInt(node["alter_id"])),
+		"net":  "tcp",
 	}
 	if sec, ok := node["security"].(string); ok && sec != "" {
 		cfg["scy"] = sec

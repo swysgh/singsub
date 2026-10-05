@@ -43,11 +43,6 @@ func levelEnabled(level string) bool {
 	return want >= cur
 }
 
-func LogDebug(format string, v ...any) {
-	if levelEnabled("DEBUG") {
-		log.Printf("[DEBUG] "+format, v...)
-	}
-}
 func LogInfo(format string, v ...any) {
 	if levelEnabled("INFO") {
 		log.Printf("[INFO]  "+format, v...)
@@ -199,17 +194,6 @@ func ToInt(v any) int {
 		return i
 	}
 	return 0
-}
-
-func ToIntDefault(v any, def int) int {
-	if v == nil {
-		return def
-	}
-	i := ToInt(v)
-	if i == 0 && def != 0 {
-		return i
-	}
-	return i
 }
 
 func ToIntStr(s string) int {

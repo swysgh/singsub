@@ -172,7 +172,7 @@ func handleHTTP(w http.ResponseWriter, r *http.Request) {
 	var failed []string
 	for _, t := range targets {
 		subName, url := t[0], t[1]
-		origin := fetch.GetSub(url, ua, gConfigDir)
+		origin := fetch.GetSub(url, ua, gConfigDir, gConfig.FetchTimeout(), gConfig.MaxBodyLimit())
 		if origin == "" {
 			failed = append(failed, subName)
 			continue
@@ -221,7 +221,8 @@ func handleScript(w http.ResponseWriter, scriptName string, qs map[string]string
 
 	common.LogInfo("执行脚本: %s (args=%v)", scriptName, args)
 
-	asm := assembler.NewAssembler(gConfig.Subs, gConfigDir, ua)
+	asm := assembler.NewAssembler(gConfig.Subs, gConfigDir, ua,
+		gConfig.ScriptTimeout(), gConfig.FetchTimeout(), gConfig.MaxBodyLimit())
 
 	config, err := asm.RunScript(entry, args)
 	if err != nil {

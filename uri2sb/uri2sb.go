@@ -130,7 +130,7 @@ func parseVmess(uri string) (map[string]any, error) {
 		"server":      cfg["add"],
 		"server_port": port,
 		"uuid":        cfg["id"],
-		"alter_id":    common.ToIntDefault(cfg["aid"], 0),
+		"alter_id":    common.ToInt(cfg["aid"]),
 	}
 
 	if scy, ok := cfg["scy"].(string); ok && scy != "" {
@@ -464,13 +464,13 @@ func parseWireguard(uri string) (map[string]any, error) {
 	}
 
 	node := map[string]any{
-		"tag":          common.FirstNonEmpty(name, host),
-		"type":         "wireguard",
-		"server":       host,
-		"server_port":  port,
+		"tag":           common.FirstNonEmpty(name, host),
+		"type":          "wireguard",
+		"server":        host,
+		"server_port":   port,
 		"local_address": []any{},
-		"private_key":  query["private_key"],
-		"peers":        []any{peer},
+		"private_key":   query["private_key"],
+		"peers":         []any{peer},
 	}
 
 	if addr := query["address"]; addr != "" {

@@ -2,6 +2,7 @@ package assembler
 
 import (
 	"errors"
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
@@ -15,10 +16,23 @@ import (
 	"singsub/fetch"
 )
 
+// errScriptTimeout 是脚本执行超时的错误标识。
+// goja.Runtime.Interrupt() 会把此值装进 *goja.InterruptedError，
+// 后者实现了 Unwrap()，因此 errors.Is(err, errScriptTimeout) 能正确识别。
+var errScriptTimeout = errors.New("script execution timeout")
+
 type Assembler struct {
-	configDir string
-	subs      map[string]string
-	ua        string
+	configDir     string
+	subs          map[string]string
+	ua            string
+	scriptTimeout time.Duration
+	fetchTimeout  time.Duration
+	maxBodyBytes  int64
+
+	// per-request 订阅缓存：保证同一请求内重复访问只抓一次。
+	// Assembler 每次请求 NewAssembler 新建，所以此处天然 per-request。
+	subCache   map[string]map[string]any
+	subCacheMu sync.Mutex
 }
 
 var (
@@ -31,11 +45,15 @@ type scriptCacheEntry struct {
 	src   string
 }
 
-func NewAssembler(subs map[string]string, configDir, ua string) *Assembler {
+func NewAssembler(subs map[string]string, configDir, ua string, scriptTimeout, fetchTimeout time.Duration, maxBodyBytes int64) *Assembler {
 	return &Assembler{
-		configDir: configDir,
-		subs:      subs,
-		ua:        ua,
+		configDir:     configDir,
+		subs:          subs,
+		ua:            ua,
+		scriptTimeout: scriptTimeout,
+		fetchTimeout:  fetchTimeout,
+		maxBodyBytes:  maxBodyBytes,
+		subCache:      map[string]map[string]any{},
 	}
 }
 
@@ -48,11 +66,27 @@ func (a *Assembler) RunScript(scriptPath string, args map[string]string) (map[st
 	}
 
 	vm := goja.New()
+
+	// 脚本执行超时：通过 goja.Runtime.Interrupt() 在 JS 代码执行中触发中断。
+	// Interrupt() 不能打断原生 Go 函数，所以 JSONUnmarshal、ReadFile 等
+	// 系统调用不在中断范围之内；这正是我们想要的（避免破坏文件系统一致性）。
+	timeout := a.scriptTimeout
+	var timer *time.Timer
+	if timeout > 0 {
+		timer = time.AfterFunc(timeout, func() {
+			vm.Interrupt(errScriptTimeout)
+		})
+		defer timer.Stop()
+	}
+
 	a.injectAPI(vm, path, args)
 
 	wrapped := "(async function() {\n" + src + "\n;if (typeof assemble !== 'undefined') { globalThis.assemble = assemble; }\n})()"
 	v, err := vm.RunScript(filepath.Base(path), wrapped)
 	if err != nil {
+		if isTimeoutErr(err) {
+			return nil, &ScriptError{Path: path, Err: fmt.Errorf("%w (timeout=%s)", errScriptTimeout, timeout)}
+		}
 		return nil, &ScriptError{Path: path, Err: err}
 	}
 
@@ -60,7 +94,11 @@ func (a *Assembler) RunScript(scriptPath string, args map[string]string) (map[st
 		if p, ok := obj.Export().(*goja.Promise); ok {
 			switch p.State() {
 			case goja.PromiseStateRejected:
-				return nil, &ScriptError{Path: path, Err: errors.New(common.ToString(p.Result()))}
+				rejErr := errors.New(common.ToString(p.Result()))
+				if isTimeoutErr(rejErr) {
+					return nil, &ScriptError{Path: path, Err: fmt.Errorf("%w (timeout=%s)", errScriptTimeout, timeout)}
+				}
+				return nil, &ScriptError{Path: path, Err: rejErr}
 			}
 		}
 	}
@@ -78,13 +116,17 @@ func (a *Assembler) RunScript(scriptPath string, args map[string]string) (map[st
 
 	if assembleVal := vm.Get("assemble"); assembleVal != nil && !goja.IsUndefined(assembleVal) {
 		if fn, ok := goja.AssertFunction(assembleVal); ok {
+			subsObj := a.buildLazySubsObject(vm)
 			context := map[string]any{
-				"subs":       buildLazySubsObject(vm, a.subs, a.ua, a.configDir),
+				"subs":       subsObj,
 				"args":       args,
 				"config_dir": a.configDir,
 			}
 			ret, err := fn(goja.Undefined(), vm.ToValue(context))
 			if err != nil {
+				if isTimeoutErr(err) {
+					return nil, &ScriptError{Path: path, Err: fmt.Errorf("%w (timeout=%s)", errScriptTimeout, timeout)}
+				}
 				return nil, &ScriptError{Path: path, Err: err}
 			}
 			if ret == nil || goja.IsUndefined(ret) || goja.IsNull(ret) {
@@ -104,6 +146,12 @@ func (a *Assembler) RunScript(scriptPath string, args map[string]string) (map[st
 	}
 
 	return nil, &ScriptError{Path: path, Err: errors.New("脚本既未设置 $content 也未定义 assemble(context)")}
+}
+
+// isTimeoutErr 识别因 Interrupt() 触发的超时。
+// goja.InterruptedError 实现了 Unwrap()，因此 errors.Is 能穿透到 errScriptTimeout。
+func isTimeoutErr(err error) bool {
+	return errors.Is(err, errScriptTimeout)
 }
 
 func (a *Assembler) loadScript(path string) (string, error) {
@@ -339,16 +387,14 @@ func (a *Assembler) produceArtifact(artifactType, name string) ([]any, error) {
 	return a.fetchSubNodes(name)
 }
 
+// fetchSubNodes 是 produceArtifact 走的子路。
+// 复用 per-request 缓存，保证同一请求内 produceArtifact(name) 多次调用只抓一次。
 func (a *Assembler) fetchSubNodes(name string) ([]any, error) {
-	url, ok := a.subs[name]
-	if !ok {
-		return nil, errors.New("未知订阅: " + name)
+	pair, err := a.fetchSubPair(name)
+	if err != nil {
+		return nil, err
 	}
-	origin := fetch.GetSub(url, a.ua, a.configDir)
-	if origin == "" {
-		return nil, errors.New("订阅获取失败: " + name)
-	}
-	outbounds, _ := detect.DetectAndParse(origin)
+	outbounds, _ := pair["outbounds"].([]any)
 	nodes := make([]any, len(outbounds))
 	for i, o := range outbounds {
 		nodes[i] = o
@@ -357,34 +403,22 @@ func (a *Assembler) fetchSubNodes(name string) ([]any, error) {
 	return nodes, nil
 }
 
-func buildLazySubsObject(_ *goja.Runtime, subs map[string]string, ua, configDir string) map[string]any {
-	result := map[string]any{}
-	cache := map[string]map[string]any{}
-	for name, url := range subs {
-		pair := fetchSubConfig(url, ua, configDir)
-		cache[name] = pair
-		result[name] = pair
+// fetchSubPair 返回 {outbounds, endpoints}，per-request 缓存。
+func (a *Assembler) fetchSubPair(name string) (map[string]any, error) {
+	if _, ok := a.subs[name]; !ok {
+		return nil, errors.New("未知订阅: " + name)
 	}
-	result["get"] = func(name string) map[string]any {
-		if pair, ok := cache[name]; ok {
-			return pair
-		}
-		return map[string]any{"outbounds": []any{}, "endpoints": []any{}}
+	a.subCacheMu.Lock()
+	if cached, ok := a.subCache[name]; ok {
+		a.subCacheMu.Unlock()
+		return cached, nil
 	}
-	result["keys"] = func() []string {
-		keys := make([]string, 0, len(subs))
-		for k := range subs {
-			keys = append(keys, k)
-		}
-		return keys
-	}
-	return result
-}
+	a.subCacheMu.Unlock()
 
-func fetchSubConfig(url, ua, configDir string) map[string]any {
-	origin := fetch.GetSub(url, ua, configDir)
+	url := a.subs[name]
+	origin := fetch.GetSub(url, a.ua, a.configDir, a.fetchTimeout, a.maxBodyBytes)
 	if origin == "" {
-		return map[string]any{"outbounds": []any{}, "endpoints": []any{}}
+		return nil, errors.New("订阅获取失败: " + name)
 	}
 	outbounds, endpoints := detect.DetectAndParse(origin)
 	obAny := make([]any, len(outbounds))
@@ -395,5 +429,88 @@ func fetchSubConfig(url, ua, configDir string) map[string]any {
 	for i, e := range endpoints {
 		epAny[i] = e
 	}
-	return map[string]any{"outbounds": obAny, "endpoints": epAny}
+	pair := map[string]any{"outbounds": obAny, "endpoints": epAny}
+
+	a.subCacheMu.Lock()
+	a.subCache[name] = pair
+	a.subCacheMu.Unlock()
+	return pair, nil
+}
+
+// lazySubs 是真正的惰性订阅代理：被 JS 访问时才抓取，同一请求内只抓一次。
+//
+// 对 root（key=""）：
+//   - Get("get")  -> JS 函数：function(name)
+//   - Get("keys") -> JS 函数：function()
+//   - Get(<订阅名>) -> 该订阅的 {outbounds, endpoints}（惰性抓取 + 缓存）
+//   - Get(其他)   -> 空对（不抛 TypeError）
+//   - Has/Get 同上语义
+//   - Keys() 返回所有订阅名 + get + keys
+type lazySubs struct {
+	a  *Assembler
+	vm *goja.Runtime
+}
+
+func (l *lazySubs) Get(key string) goja.Value {
+	switch key {
+	case "get":
+		return l.vm.ToValue(func(call goja.FunctionCall) goja.Value {
+			name := call.Argument(0).String()
+			pair, err := l.a.fetchSubPair(name)
+			if err != nil {
+				common.LogWarn("脚本访问未配置订阅 %q: %s", name, err)
+				return l.a.emptyPairObject(l.vm)
+			}
+			return l.vm.ToValue(pair)
+		})
+	case "keys":
+		return l.vm.ToValue(func(call goja.FunctionCall) goja.Value {
+			keys := make([]string, 0, len(l.a.subs))
+			for k := range l.a.subs {
+				keys = append(keys, k)
+			}
+			return l.vm.ToValue(keys)
+		})
+	}
+	// 视为订阅名访问
+	pair, err := l.a.fetchSubPair(key)
+	if err != nil {
+		common.LogWarn("脚本访问未配置订阅 %q: %s", key, err)
+		return l.a.emptyPairObject(l.vm)
+	}
+	return l.vm.ToValue(pair)
+}
+
+func (l *lazySubs) Set(string, goja.Value) bool { return false }
+func (l *lazySubs) Has(key string) bool {
+	if key == "get" || key == "keys" {
+		return true
+	}
+	_, ok := l.a.subs[key]
+	return ok
+}
+func (l *lazySubs) Delete(string) bool { return false }
+func (l *lazySubs) Keys() []string {
+	keys := make([]string, 0, len(l.a.subs)+2)
+	for k := range l.a.subs {
+		keys = append(keys, k)
+	}
+	keys = append(keys, "get", "keys")
+	return keys
+}
+
+// buildLazySubsObject 返回真正的惰性订阅对象：
+// 访问某个订阅名时才去抓取+解析，且同一请求内重复访问只抓一次。
+func (a *Assembler) buildLazySubsObject(vm *goja.Runtime) *goja.Object {
+	return vm.NewDynamicObject(&lazySubs{a: a, vm: vm})
+}
+
+// emptyPairObject 在未知订阅名时返回一个空对对象 {outbounds:[], endpoints:[]}，
+// 确保脚本写 subs["xxx"].outbounds 时不抛 TypeError。
+func (a *Assembler) emptyPairObject(vm *goja.Runtime) goja.Value {
+	pair := map[string]any{
+		"outbounds": []any{},
+		"endpoints": []any{},
+	}
+	return vm.ToValue(pair)
 }

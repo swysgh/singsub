@@ -87,8 +87,8 @@ func dialFields(onenode, node map[string]any) {
 			if brutal, ok := smux["brutal-opts"].(map[string]any); ok {
 				if common.CheckTrue(brutal["enabled"]) {
 					node["brutal"] = map[string]any{
-						"enabled":    true,
-						"up_mbps":    toIntAnyDefault(brutal["up"], 100),
+						"enabled":   true,
+						"up_mbps":   toIntAnyDefault(brutal["up"], 100),
 						"down_mbps": toIntAnyDefault(brutal["down"], 100),
 					}
 				}
