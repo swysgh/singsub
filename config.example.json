@@ -6,11 +6,11 @@
     "rtx.al": "https://another.example.com/sub"
   },
   "scripts": {
-    "desktop": "script/desktop.js",
-    "homeserver": "script/homeserver.js"
+    "device": "script/device.js",
+    "router": "script/router.js"
   },
   "shares": {
-    "share_abc123": "homeserver",
-    "share_def456": "desktop"
+    "share_abc123": "router",
+    "share_def456": "device"
   }
 }
