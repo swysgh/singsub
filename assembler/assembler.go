@@ -404,6 +404,12 @@ func (a *Assembler) fetchSubNodes(name string) ([]any, error) {
 }
 
 // fetchSubPair 返回 {outbounds, endpoints}，per-request 缓存。
+//
+// 订阅拉取失败时**不返回空对**：脚本照常装配，客户端就会拿到一份带空分组的
+// 配置，sing-box check 报 `initialize outbound[N]: missing tags` 整份失败
+// （实测：机场订阅一次 DNS 解析失败，就让桌面连续两次更新失败）。
+// 改成塞一条 direct 占位节点、tag 直接写明是哪个订阅、为什么失败 ——
+// 配置能正常启动，失败原因也摆在客户端的节点列表里，不用翻服务端日志。
 func (a *Assembler) fetchSubPair(name string) (map[string]any, error) {
 	if _, ok := a.subs[name]; !ok {
 		return nil, errors.New("未知订阅: " + name)
@@ -416,9 +422,13 @@ func (a *Assembler) fetchSubPair(name string) (map[string]any, error) {
 	a.subCacheMu.Unlock()
 
 	url := a.subs[name]
-	origin := fetch.GetSub(url, a.ua, a.configDir, a.fetchTimeout, a.maxBodyBytes)
-	if origin == "" {
-		return nil, errors.New("订阅获取失败: " + name)
+	origin, err := fetch.GetSubWithErr(url, a.ua, a.configDir, a.fetchTimeout, a.maxBodyBytes)
+	if err != nil {
+		pair := failedSubPair(name, err)
+		a.subCacheMu.Lock()
+		a.subCache[name] = pair
+		a.subCacheMu.Unlock()
+		return pair, nil
 	}
 	outbounds, endpoints := detect.DetectAndParse(origin)
 	obAny := make([]any, len(outbounds))
@@ -435,6 +445,28 @@ func (a *Assembler) fetchSubPair(name string) (map[string]any, error) {
 	a.subCache[name] = pair
 	a.subCacheMu.Unlock()
 	return pair, nil
+}
+
+// failedSubPair 造一个「订阅拉取失败」的占位订阅：一条 direct 出站，tag 写明订阅名和失败原因。
+//
+// 用 direct 是因为失败时用户最可能想的就是「先直连顶着」，而不是把流量丢给别的节点；
+// 原因写进 tag 则是因为客户端只认配置、看不到服务端日志。
+func failedSubPair(name string, err error) map[string]any {
+	tag := fmt.Sprintf("❌ %s 拉取失败: %s", name, truncateRunes(err.Error(), 120))
+	common.LogWarn("订阅 %q 拉取失败: %s（已用一条 direct 占位节点代替，tag=%q）", name, err, tag)
+	return map[string]any{
+		"outbounds": []any{map[string]any{"type": "direct", "tag": tag}},
+		"endpoints": []any{},
+	}
+}
+
+// truncateRunes 按字符（不是字节）截断，避免把多字节字符切成乱码。
+func truncateRunes(s string, max int) string {
+	r := []rune(s)
+	if len(r) <= max {
+		return s
+	}
+	return string(r[:max]) + "…"
 }
 
 // lazySubs 是真正的惰性订阅代理：被 JS 访问时才抓取，同一请求内只抓一次。

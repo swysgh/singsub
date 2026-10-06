@@ -21,12 +21,14 @@ func DetectAndParse(originData string) (outbounds, endpoints []map[string]any) {
 			if hasOutbounds || hasEndpoints {
 				outbounds = toMapSlice(config["outbounds"])
 				endpoints = toMapSlice(config["endpoints"])
+				ensureRealityUTLS(outbounds)
 				return outbounds, endpoints
 			}
 		}
 	}
 
 	if nodes := tryClash(originData); nodes != nil {
+		ensureRealityUTLS(nodes)
 		return nodes, nil
 	}
 
@@ -34,7 +36,39 @@ func DetectAndParse(originData string) (outbounds, endpoints []map[string]any) {
 	if nodes == nil {
 		return nil, nil
 	}
+	ensureRealityUTLS(nodes)
 	return nodes, nil
+}
+
+// 兼容订阅里没写指纹的 REALITY 节点。
+//
+// sing-box 的 REALITY 客户端**强制要求 uTLS**,没有它 `sing-box check` 直接失败:
+//
+//	FATAL[0000] initialize outbound[41]: uTLS is required by reality client
+//
+// REALITY 的伪装本就是照着某个真实浏览器的样子握手 —— 缺指纹时补 chrome 是唯一安全的取值,
+// 换成别的浏览器反而会把 SNI 与指纹的匹配关系弄拧。这里补上是为了让订阅侧漏写指纹时
+// 仍能产出可用配置,而不是让整份配置在客户端校验阶段整块失败。
+const defaultRealityFingerprint = "chrome"
+
+func ensureRealityUTLS(nodes []map[string]any) {
+	for _, node := range nodes {
+		tls, ok := node["tls"].(map[string]any)
+		if !ok || tls == nil {
+			continue
+		}
+		reality, ok := tls["reality"].(map[string]any)
+		if !ok || reality == nil || !common.ToBool(reality["enabled"]) {
+			continue
+		}
+		if utls, ok := tls["utls"].(map[string]any); ok && common.ToBool(utls["enabled"]) &&
+			common.ToString(utls["fingerprint"]) != "" {
+			continue
+		}
+		common.LogWarn("节点 %q 缺少 uTLS 指纹,REALITY 客户端必须有 uTLS,已补默认指纹 %s",
+			common.ToString(node["tag"]), defaultRealityFingerprint)
+		tls["utls"] = map[string]any{"enabled": true, "fingerprint": defaultRealityFingerprint}
+	}
 }
 
 func tryClash(originData string) []map[string]any {

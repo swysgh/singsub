@@ -3,6 +3,7 @@ package fetch
 import (
 	"context"
 	"errors"
+	"fmt"
 	"io"
 	"net"
 	"net/http"
@@ -70,15 +71,32 @@ func readLocalFile(path, baseDir string) (string, error) {
 
 // GetSub 抓取一个订阅。失败返回空字符串，成功返回原始 body。
 //
-// fetchTimeout 是整个请求（含 body 读取）的最大允许时间；<=0 时使用 15s 默认。
-// maxBodyBytes 是 body 读取的上限；<=0 时使用 32 MiB 默认。超限返回空字符串并记日志。
+// 失败时调用方拿不到原因，只能自己编一个（或者干脆什么都不做）——
+// 需要把原因给用户看的地方请用 GetSubWithErr。
 func GetSub(rawURL, ua, baseDir string, fetchTimeout time.Duration, maxBodyBytes int64) string {
+	content, _ := GetSubWithErr(rawURL, ua, baseDir, fetchTimeout, maxBodyBytes)
+	return content
+}
+
+// GetSubWithErr 与 GetSub 相同，但把失败原因一并返回。
+//
+// 为什么需要它：失败只写进日志时，调用方无法把原因传到客户端，只能当作
+// 「这个订阅没有节点」处理 —— 结果是一份带空分组的配置发出去，客户端
+// sing-box check 报 `initialize outbound[N]: missing tags` 整份失败，
+// 而日志里的真正原因（DNS 解析失败、403、超时）在客户端完全看不到。
+//
+// fetchTimeout 是整个请求（含 body 读取）的最大允许时间；<=0 时使用 15s 默认。
+// maxBodyBytes 是 body 读取的上限；<=0 时使用 32 MiB 默认。超限报错并记日志。
+func GetSubWithErr(rawURL, ua, baseDir string, fetchTimeout time.Duration, maxBodyBytes int64) (string, error) {
 	if !IsURL(rawURL) {
 		content, err := readLocalFile(rawURL, baseDir)
 		if err != nil {
-			return ""
+			if os.IsNotExist(err) {
+				return "", fmt.Errorf("本地文件不存在: %s", rawURL)
+			}
+			return "", fmt.Errorf("读取本地文件失败: %s (%s)", rawURL, err)
 		}
-		return content
+		return content, nil
 	}
 
 	if ua == "" {
@@ -100,7 +118,7 @@ func GetSub(rawURL, ua, baseDir string, fetchTimeout time.Duration, maxBodyBytes
 	req, err := http.NewRequestWithContext(ctx, "GET", rawURL, nil)
 	if err != nil {
 		common.LogError("请求 %s 构造失败: %s", rawURL, err)
-		return ""
+		return "", fmt.Errorf("请求构造失败: %s", err)
 	}
 	req.Header.Set("User-Agent", ua)
 
@@ -109,16 +127,16 @@ func GetSub(rawURL, ua, baseDir string, fetchTimeout time.Duration, maxBodyBytes
 	if err != nil {
 		if isTimeoutErr(err) {
 			common.LogError("请求 %s 超时 (timeout=%s)，请检查网络连接或目标服务器响应速度", rawURL, fetchTimeout)
-		} else {
-			common.LogError("无法连接到 %s: %s", rawURL, err)
+			return "", fmt.Errorf("请求超时 (timeout=%s)", fetchTimeout)
 		}
-		return ""
+		common.LogError("无法连接到 %s: %s", rawURL, err)
+		return "", fmt.Errorf("无法连接: %s", stripURL(err))
 	}
 	defer resp.Body.Close()
 
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
 		common.LogError("HTTP 错误：请求 %s 失败，状态码 %d", rawURL, resp.StatusCode)
-		return ""
+		return "", fmt.Errorf("HTTP 状态码 %d", resp.StatusCode)
 	}
 
 	// 用 LimitReader 限制 body 上游，防止恶意/异常响应吃光内存。
@@ -127,18 +145,30 @@ func GetSub(rawURL, ua, baseDir string, fetchTimeout time.Duration, maxBodyBytes
 	if err != nil {
 		if isTimeoutErr(err) {
 			common.LogError("请求 %s 读取 body 超时 (timeout=%s)", rawURL, fetchTimeout)
-		} else {
-			common.LogError("读取 %s 响应失败: %s", rawURL, err)
+			return "", fmt.Errorf("读取响应超时 (timeout=%s)", fetchTimeout)
 		}
-		return ""
+		common.LogError("读取 %s 响应失败: %s", rawURL, err)
+		return "", fmt.Errorf("读取响应失败: %s", err)
 	}
 	if int64(len(body)) > maxBodyBytes {
 		common.LogError("请求 %s 响应体超过 %d 字节上限，已截断/拒绝", rawURL, maxBodyBytes)
-		return ""
+		return "", fmt.Errorf("响应体超过 %d 字节上限", maxBodyBytes)
 	}
 
 	common.LogInfo("成功获取订阅: %s (状态码=%d, %d 字节)", rawURL, resp.StatusCode, len(body))
-	return string(body)
+	return string(body), nil
+}
+
+// stripURL 去掉 *url.Error 外壳。
+//
+// 它的 Error() 会把整个 URL 拼进消息里（订阅 URL 带 token），而这个原因要写进
+// 给客户端看的节点 tag —— 不该把 token 带到客户端的节点列表里。
+func stripURL(err error) error {
+	var uerr *url.Error
+	if errors.As(err, &uerr) && uerr.Err != nil {
+		return uerr.Err
+	}
+	return err
 }
 
 // isTimeoutErr 标准方式识别超时：context.DeadlineExceeded 或 net.Error.Timeout。
