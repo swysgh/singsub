@@ -30,7 +30,16 @@ jobs:
         run: go vet -buildvcs=false ./...
 
       - name: gofmt clean
-        run: test -z "$(gofmt -l .)"
+        run: |
+          unformatted="$(gofmt -l .)"
+          if [ -n "$unformatted" ]; then
+            while IFS= read -r f; do
+              echo "::error file=$f,line=1::$f 未通过 gofmt，运行 gofmt -w $f 修复"
+            done <<< "$unformatted"
+            echo "--- gofmt -d 预览 ---"
+            gofmt -d .
+            exit 1
+          fi
 
       - name: Test
         run: go test ./... -v
